@@ -42,7 +42,7 @@ void causal_conv1d_fwd_kernel(ConvParamsBase params) {
     constexpr int kWidth = Ktraits::kWidth;
     constexpr int kNThreads = Ktraits::kNThreads;
     constexpr int kNElts = Ktraits::kNElts;
-    constexpr bool kIsVecLoad = Ktraits::kIsVecLoad;
+    static constexpr bool kIsVecLoad = Ktraits::kIsVecLoad;
     using input_t = typename Ktraits::input_t;
     using vec_t = typename Ktraits::vec_t;
     using weight_t = typename Ktraits::weight_t;

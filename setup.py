@@ -3,6 +3,7 @@ import sys
 import warnings
 import os
 import re
+import shutil
 import ast
 from pathlib import Path
 from packaging.version import parse, Version
@@ -147,7 +148,7 @@ if not SKIP_CUDA_BUILD:
                     + cc_flag
                 ),
             },
-            include_dirs=[this_dir],
+            include_dirs=[Path(this_dir) / "csrc" / "causal_conv1d"],
         )
     )
 
@@ -216,7 +217,7 @@ class CachedWheelsCommand(_bdist_wheel):
 
             wheel_path = os.path.join(self.dist_dir, archive_basename + ".whl")
             print("Raw wheel path", wheel_path)
-            os.rename(wheel_filename, wheel_path)
+            shutil.move(wheel_filename, wheel_path)
         except urllib.error.HTTPError:
             print("Precompiled wheel not found. Building from source...")
             # If the wheel could not be downloaded, build from source
