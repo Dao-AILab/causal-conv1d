@@ -195,12 +195,14 @@ def test_causal_conv1d_varlen(dim, seqlen, width, has_bias, silu_activation, ity
     rtolw, atolw = (1e-3, 1e-3)
     # set seed
     torch.random.manual_seed(seqlen + dim + width)
-    batch = 2
-    nsplits = torch.randint(1, 5, (1,)).item()
-    eos_pos = torch.randperm(seqlen - 1)[:nsplits].sort().values
-    seqlens = torch.diff(torch.cat([torch.tensor([-1]), eos_pos, torch.tensor([seqlen - 1])])).tolist()
-    assert sum(seqlens) == seqlen
-    assert all(s > 0 for s in seqlens)
+    batch = 3
+    seqlens = []
+    for b in range(batch):
+        nsplits = torch.randint(1, 5, (1,)).item()
+        eos_pos = torch.randperm(seqlen - 1)[:nsplits].sort().values
+        seqlens.append(torch.diff(torch.cat([torch.tensor([-1]), eos_pos, torch.tensor([seqlen - 1])])).tolist())
+        assert sum(seqlens[-1]) == seqlen
+        assert all(s > 0 for s in seqlens[-1])
     # Only support channel_last
     x = rearrange(
         torch.randn(batch, seqlen, 4096 + dim + 64, device=device, dtype=itype)[:, :, 4096:4096 + dim], "b s d -> b d s"
@@ -210,18 +212,20 @@ def test_causal_conv1d_varlen(dim, seqlen, width, has_bias, silu_activation, ity
         bias = torch.randn(dim, device=device, dtype=torch.float32, requires_grad=True)
     else:
         bias = None
-    seq_idx = repeat(torch.cat([torch.full((s,), i, dtype=torch.int32, device=device) for i, s in enumerate(seqlens)], dim=0),
-                     "s -> b s", b=batch)
+    seq_idx = torch.stack([torch.cat([torch.full((s,), i, dtype=torch.int32, device=device) for i, s in enumerate(sl)], dim=0)
+                           for sl in seqlens], dim=0)
     x_ref = x.detach().clone().requires_grad_()
     weight_ref = weight.detach().clone().requires_grad_()
     bias_ref = bias.detach().clone().requires_grad_() if bias is not None else None
     activation = None if not silu_activation else "silu"
     out = causal_conv1d_fn(x, weight, bias, seq_idx=seq_idx, activation=activation)
-    # out = causal_conv1d_fn(x, weight, bias, activation=activation)
     out_ref = []
-    for x_s in torch.split(x_ref, seqlens, dim=2):
-        out_ref.append(causal_conv1d_ref(x_s, weight_ref, bias_ref, activation=activation))
-    out_ref = torch.cat(out_ref, dim=2)
+    for b in range(batch):
+        out_ref_b = []
+        for x_s in torch.split(x_ref[[b]], seqlens[b], dim=2):
+            out_ref_b.append(causal_conv1d_ref(x_s, weight_ref, bias_ref, activation=activation))
+        out_ref.append(torch.cat(out_ref_b, dim=2))
+    out_ref = torch.cat(out_ref, dim=0)
 
     print(f"Output max diff: {(out - out_ref).abs().max().item()}")
     print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
