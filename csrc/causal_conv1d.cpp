@@ -130,6 +130,7 @@ void set_conv_params_bwd(ConvParamsBwd &params,
 at::Tensor
 causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
                   const c10::optional<at::Tensor> &bias_,
+                  const c10::optional<at::Tensor> &seq_idx_,
                   bool silu_activation) {
     auto input_type = x.scalar_type();
     auto weight_type = weight.scalar_type();
@@ -156,7 +157,6 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
     }
     TORCH_CHECK(width >= 2 && width <= 4, "causal_conv1d only supports width between 2 and 4");
 
-
     if (bias_.has_value()) {
         auto bias = bias_.value();
         TORCH_CHECK(bias.scalar_type() == weight_type);
@@ -165,12 +165,27 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
         CHECK_SHAPE(bias, dim);
     }
 
+    if (seq_idx_.has_value()) {
+        TORCH_CHECK(is_channel_last, "seq_idx only supported for channel last layout");
+        auto seq_idx = seq_idx_.value();
+        TORCH_CHECK(seq_idx.scalar_type() == torch::kInt32);
+        TORCH_CHECK(seq_idx.is_cuda());
+        TORCH_CHECK(seq_idx.is_contiguous());
+        CHECK_SHAPE(seq_idx, batch_size, seqlen);
+    }
+
     at::Tensor out = torch::empty_like(x);
 
     ConvParamsBase params;
     set_conv_params_fwd(params, batch_size, dim, seqlen, width, x, weight, out,
                         bias_.has_value() ? bias_.value().data_ptr() : nullptr,
                         silu_activation);
+
+    if (seq_idx_.has_value()) {
+        params.seq_idx_ptr = seq_idx_.value().data_ptr();
+    } else {
+        params.seq_idx_ptr = nullptr;
+    }
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
@@ -192,6 +207,7 @@ std::vector<at::Tensor>
 causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
                   const c10::optional<at::Tensor> &bias_,
                   at::Tensor &dout,
+                  c10::optional<at::Tensor> &seq_idx_,
                   c10::optional<at::Tensor> &dx_,
                   bool silu_activation) {
     auto input_type = x.scalar_type();
@@ -228,6 +244,15 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
         CHECK_SHAPE(bias, dim);
     }
 
+    if (seq_idx_.has_value()) {
+        TORCH_CHECK(is_channel_last, "seq_idx only supported for channel last layout");
+        auto seq_idx = seq_idx_.value();
+        TORCH_CHECK(seq_idx.scalar_type() == torch::kInt32);
+        TORCH_CHECK(seq_idx.is_cuda());
+        TORCH_CHECK(seq_idx.is_contiguous());
+        CHECK_SHAPE(seq_idx, batch_size, seqlen);
+    }
+
     at::Tensor dx;
     if (dx_.has_value()) {
         dx = dx_.value();
@@ -254,6 +279,12 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
                         dout, dx, dweight, bias_.has_value() ? dbias.data_ptr() : nullptr,
                         silu_activation);
 
+    if (seq_idx_.has_value()) {
+        params.seq_idx_ptr = seq_idx_.value().data_ptr();
+    } else {
+        params.seq_idx_ptr = nullptr;
+    }
+
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_bwd", [&] {
         DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_bwd", [&] {
@@ -272,7 +303,7 @@ causal_conv1d_update(const at::Tensor &x,
                      const at::Tensor &conv_state,
                      const at::Tensor &weight,
                      const c10::optional<at::Tensor> &bias_,
-                  bool silu_activation) {
+                     bool silu_activation) {
     auto input_type = x.scalar_type();
     auto weight_type = weight.scalar_type();
     TORCH_CHECK(input_type == at::ScalarType::Float || input_type == at::ScalarType::Half || input_type == at::ScalarType::BFloat16);

@@ -190,7 +190,7 @@ struct Causal_conv1d_channellast_fwd_kernel_traits {
     // static constexpr int kSmemSize = kChunkSizeL * kNEltsPerRow * kNBytes;
 };
 
-template<typename Ktraits>
+template<typename Ktraits, bool kHasSeqIdx>
 __global__ __launch_bounds__(Ktraits::kNThreads)
 void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
     constexpr int kWidth = Ktraits::kWidth;
@@ -220,6 +220,8 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
         + chunk_c_id * kChunkSizeC * params.weight_c_stride;
     input_t *out = reinterpret_cast<input_t *>(params.out_ptr) + batch_id * params.out_batch_stride
         + (chunk_l_id * kChunkSizeL + l_idx) * params.out_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
+    int *seq_idx = !kHasSeqIdx ? nullptr : reinterpret_cast<int *>(params.seq_idx_ptr)
+        + batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
 
     #pragma unroll
     for (int l = 0; l < Ktraits::kNLoads; ++l) {
@@ -269,13 +271,27 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
     for (int i = 0; i < kWidth - 1 + kLPerThread; ++i) {
         x_vals[i] = float(x_smem[col_idx * kLPerThread + i][row_idx]);
     }
+    int seq_idx_thread[kWidth - 1 + kLPerThread];
+    if constexpr (kHasSeqIdx) {
+        #pragma unroll
+        for (int i = 0; i < kWidth - 1 + kLPerThread; ++i) {
+            seq_idx_thread[i] = chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i - (kWidth - 1) >= 0 ? seq_idx[col_idx * kLPerThread + i - (kWidth - 1)] : -1;
+        }
+    }
 
     float out_vals[kLPerThread];
     #pragma unroll
     for (int i = 0; i < kLPerThread; ++i) {
         out_vals[i] = bias_val;
+        const int seq_idx_cur = !kHasSeqIdx ? 0 : seq_idx_thread[i + kWidth - 1];
         #pragma unroll
-        for (int w = 0; w < kWidth; ++w) { out_vals[i] += weight_vals[w] * x_vals[i + w]; }
+        for (int w = 0; w < kWidth; ++w) {
+            if constexpr (!kHasSeqIdx) {
+                out_vals[i] += weight_vals[w] * x_vals[i + w];
+            } else {
+                out_vals[i] += seq_idx_thread[i + w] == seq_idx_cur ? weight_vals[w] * x_vals[i + w] : 0.f;
+            }
+        }
         if (params.silu_activation) {out_vals[i] = out_vals[i] / (1 + expf(-out_vals[i])); }
     }
 
@@ -299,23 +315,24 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
 
 template<int kNThreads, int kWidth, typename input_t, typename weight_t>
 void causal_conv1d_channellast_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
-    using Ktraits = Causal_conv1d_channellast_fwd_kernel_traits<kNThreads, kWidth, 64, true, input_t, weight_t>;
-    // constexpr int kSmemSize = Ktraits::kSmemSize;
-    constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
-    constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
-    const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
-    const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
-    // printf("n_chunks_L: %d, n_chunks_C: %d\n", n_chunks_L, n_chunks_C);
-    dim3 grid(params.batch, n_chunks_L, n_chunks_C);
-    dim3 block(Ktraits::kNThreads);
-    auto kernel = &causal_conv1d_channellast_fwd_kernel<Ktraits>;
-    // if (kSmemSize >= 48 * 1024) {
-    //     C10_CUDA_CHECK(cudaFuncSetAttribute(
-    //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-    //     }
-    // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-    kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    BOOL_SWITCH(params.seq_idx_ptr != nullptr, kHasSeqIdx, [&] {
+        using Ktraits = Causal_conv1d_channellast_fwd_kernel_traits<kNThreads, kWidth, 64, true, input_t, weight_t>;
+        // constexpr int kSmemSize = Ktraits::kSmemSize;
+        constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
+        constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
+        const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
+        const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
+        dim3 grid(params.batch, n_chunks_L, n_chunks_C);
+        dim3 block(Ktraits::kNThreads);
+        auto kernel = &causal_conv1d_channellast_fwd_kernel<Ktraits, kHasSeqIdx>;
+        // if (kSmemSize >= 48 * 1024) {
+        //     C10_CUDA_CHECK(cudaFuncSetAttribute(
+        //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+        //     }
+        // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+        kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
 }
 
 template<typename input_t, typename weight_t>

@@ -8,42 +8,45 @@ import causal_conv1d_cuda
 
 
 class CausalConv1dFn(torch.autograd.Function):
+
     @staticmethod
-    def forward(ctx, x, weight, bias=None, activation=None):
+    def forward(ctx, x, weight, bias=None, seq_idx=None, activation=None):
         if activation not in [None, "silu", "swish"]:
             raise NotImplementedError("activation must be None, silu, or swish")
         if x.stride(2) != 1 and x.stride(1) != 1:
             x = x.contiguous()
         bias = bias.contiguous() if bias is not None else None
-        ctx.save_for_backward(x, weight, bias)
+        seq_idx = seq_idx.contiguous() if seq_idx is not None else None
+        ctx.save_for_backward(x, weight, bias, seq_idx)
         ctx.activation = activation in ["silu", "swish"]
-        out = causal_conv1d_cuda.causal_conv1d_fwd(x, weight, bias, ctx.activation)
+        out = causal_conv1d_cuda.causal_conv1d_fwd(x, weight, bias, seq_idx, ctx.activation)
         return out
 
     @staticmethod
     def backward(ctx, dout):
-        x, weight, bias = ctx.saved_tensors
+        x, weight, bias, seq_idx = ctx.saved_tensors
         if dout.stride(2) != 1 and dout.stride(1) != 1:
             dout = dout.contiguous()
         # The kernel supports passing in a pre-allocated dx (e.g., in case we want to fuse the
         # backward of conv1d with the backward of chunk).
         # Here we just pass in None and dx will be allocated in the C++ code.
         dx, dweight, dbias = causal_conv1d_cuda.causal_conv1d_bwd(
-            x, weight, bias, dout, None, ctx.activation
+            x, weight, bias, dout, seq_idx, None, ctx.activation
         )
-        return dx, dweight, dbias if bias is not None else None, None
+        return dx, dweight, dbias if bias is not None else None, None, None
 
 
-def causal_conv1d_fn(x, weight, bias=None, activation=None):
+def causal_conv1d_fn(x, weight, bias=None, seq_idx=None, activation=None):
     """
     x: (batch, dim, seqlen)
     weight: (dim, width)
     bias: (dim,)
+    seq_idx: (batch, seqlen)
     activation: either None or "silu" or "swish"
 
     out: (batch, dim, seqlen)
     """
-    return CausalConv1dFn.apply(x, weight, bias, activation)
+    return CausalConv1dFn.apply(x, weight, bias, seq_idx, activation)
 
 
 def causal_conv1d_ref(x, weight, bias=None, activation=None):

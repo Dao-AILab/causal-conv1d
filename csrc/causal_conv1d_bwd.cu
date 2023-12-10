@@ -303,7 +303,7 @@ struct Causal_conv1d_channellast_bwd_kernel_traits {
     // static constexpr int kSmemSize = kChunkSizeL * kNEltsPerRow * kNBytes;
 };
 
-template<typename Ktraits>
+template<typename Ktraits, bool kHasSeqIdx>
 __global__ __launch_bounds__(Ktraits::kNThreads)
 void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
     constexpr int kWidth = Ktraits::kWidth;
@@ -339,6 +339,8 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
         + (chunk_l_id * kChunkSizeL + l_idx) * params.dx_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
     float *dweight = reinterpret_cast<float *>(params.dweight_ptr)
         + chunk_c_id * kChunkSizeC * params.dweight_c_stride;
+    int *seq_idx = !kHasSeqIdx ? nullptr : reinterpret_cast<int *>(params.seq_idx_ptr)
+        + batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
 
     #pragma unroll
     for (int l = 0; l < Ktraits::kNLoads; ++l) {
@@ -411,6 +413,15 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
         x_vals[i] = float(x_smem[col_idx * kLPerThread + i][row_idx]);
     }
 
+    int seq_idx_thread[kWidth - 1 + kLPerThread + kWidth - 1];
+    if constexpr (kHasSeqIdx) {
+        #pragma unroll
+        for (int i = 0; i < kWidth - 1 + kLPerThread + kWidth - 1; ++i) {
+            const int l_idx = chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i - (kWidth - 1);
+            seq_idx_thread[i] = l_idx >= 0 && l_idx < params.seqlen ? seq_idx[col_idx * kLPerThread + i - (kWidth - 1)] : -1;
+        }
+    }
+
     if constexpr (kSiluAct) {  // Recompute the output
         #pragma unroll
         for (int i = kWidth - 1 + kLPerThread; i < kWidth - 1 + kLPerThread + kWidth - 1; ++i) {
@@ -419,8 +430,15 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
         #pragma unroll
         for (int i = 0; i < kLPerThread + kWidth - 1; ++i) {
             float out_val = bias_val;
+            const int seq_idx_cur = !kHasSeqIdx ? 0 : seq_idx_thread[i + kWidth - 1];
             #pragma unroll
-            for (int w = 0; w < kWidth; ++w) { out_val += weight_vals[w] * x_vals[i + w]; }
+            for (int w = 0; w < kWidth; ++w) {
+                if constexpr (!kHasSeqIdx) {
+                    out_val += weight_vals[w] * x_vals[i + w];
+                } else {
+                    out_val += seq_idx_thread[i + w] == seq_idx_cur ? weight_vals[w] * x_vals[i + w] : 0.f;
+                }
+            }
             float out_val_sigmoid = 1.f / (1.f + expf(-out_val));
             dout_vals[i] *= out_val_sigmoid * (1 + out_val * (1 - out_val_sigmoid));
         }
@@ -431,7 +449,13 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
     #pragma unroll
     for (int w = 0; w < kWidth; ++w) {
         #pragma unroll
-        for (int i = 0; i < kLPerThread; ++i) { dweight_vals[w] += x_vals[i + w] * dout_vals[i]; }
+        for (int i = 0; i < kLPerThread; ++i) {
+            if constexpr (!kHasSeqIdx) {
+                dweight_vals[w] += x_vals[i + w] * dout_vals[i];
+            } else {
+                dweight_vals[w] += seq_idx_thread[i + w] == seq_idx_thread[kWidth - 1 + i] ? x_vals[i + w] * dout_vals[i] : 0.f;
+            }
+        }
         dweight_vals[w] = Allreduce<kNThreadsPerRow>::run(dweight_vals[w], sum_op);
         if (col_idx == 0 && chunk_c_id * kChunkSizeC + row_idx < params.dim) {
             atomicAdd(&reinterpret_cast<float *>(dweight)[row_idx * params.dweight_c_stride + w * params.dweight_width_stride], dweight_vals[w]);
@@ -450,8 +474,15 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
     float dx_vals[kLPerThread] = {0};
     #pragma unroll
     for (int i = 0; i < kLPerThread; ++i) {
+        const int seq_idx_cur = !kHasSeqIdx ? 0 : seq_idx_thread[i + kWidth - 1];
         #pragma unroll
-        for (int w = 0; w < kWidth; ++w) { dx_vals[i] += weight_vals[kWidth - 1 - w] * dout_vals[i + w]; }
+        for (int w = 0; w < kWidth; ++w) {
+            if constexpr (!kHasSeqIdx) {
+                dx_vals[i] += weight_vals[kWidth - 1 - w] * dout_vals[i + w];
+            } else {
+                dx_vals[i] += seq_idx_thread[kWidth - 1 + i + w] == seq_idx_cur ? weight_vals[kWidth - 1 - w] * dout_vals[i + w] : 0.f;
+            }
+        }
     }
     // Since kNThreadsPerRow is a power of 2 and <= 32, we only need syncwarp and not syncthreads.
     __syncwarp();
@@ -474,22 +505,24 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
 template<int kNThreads, int kWidth, typename input_t, typename weight_t>
 void causal_conv1d_channellast_bwd_launch(ConvParamsBwd &params, cudaStream_t stream) {
     BOOL_SWITCH(params.silu_activation, kSiluAct, [&] {
-        using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, 64, kSiluAct, true, input_t, weight_t>;
-        // constexpr int kSmemSize = Ktraits::kSmemSize;
-        constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
-        constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
-        const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
-        const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
-        dim3 grid(params.batch, n_chunks_L, n_chunks_C);
-        dim3 block(Ktraits::kNThreads);
-        auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits>;
-        // if (kSmemSize >= 48 * 1024) {
-        //     C10_CUDA_CHECK(cudaFuncSetAttribute(
-        //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-        //     }
-        // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-        kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        BOOL_SWITCH(params.seq_idx_ptr != nullptr, kHasSeqIdx, [&] {
+            using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, 64, kSiluAct, true, input_t, weight_t>;
+            // constexpr int kSmemSize = Ktraits::kSmemSize;
+            constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
+            constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
+            const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
+            const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
+            dim3 grid(params.batch, n_chunks_L, n_chunks_C);
+            dim3 block(Ktraits::kNThreads);
+            auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx>;
+            // if (kSmemSize >= 48 * 1024) {
+            //     C10_CUDA_CHECK(cudaFuncSetAttribute(
+            //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+            //     }
+            // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+            kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
     });
 }
 

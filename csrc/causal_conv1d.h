@@ -32,6 +32,8 @@ struct ConvParamsBase {
     void *__restrict__ out_ptr;
 
     void *__restrict__ conv_state_ptr;
+
+    void *__restrict__ seq_idx_ptr;
 };
 
 struct ConvParamsBwd: public ConvParamsBase {
