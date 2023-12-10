@@ -26,7 +26,8 @@ from causal_conv1d.causal_conv1d_interface import causal_conv1d_update, causal_c
 )
 # @pytest.mark.parametrize('seqlen', [8, 16, 32, 64, 128, 256, 512, 784, 1024, 2048, 4096])
 # @pytest.mark.parametrize('seqlen', [128])
-def test_causal_conv1d(seqlen, width, has_bias, silu_activation, itype, channel_last):
+@pytest.mark.parametrize('dim', [64, 4096 + 32])
+def test_causal_conv1d(dim, seqlen, width, has_bias, silu_activation, itype, channel_last):
     device = "cuda"
     rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (3e-3, 5e-3)
     if itype == torch.bfloat16:
@@ -34,15 +35,13 @@ def test_causal_conv1d(seqlen, width, has_bias, silu_activation, itype, channel_
     rtolw, atolw = (1e-3, 1e-3)
     # set seed
     torch.random.manual_seed(0)
-    batch_size = 2
-    # batch_size = 1
-    dim = 4096 + 32  # Try dim not divisible by 64
-    # dim = 64
+    batch = 2
+    # batch = 1
     if not channel_last:
-        x = torch.randn(batch_size, 4096 + dim + 64, seqlen, device=device, dtype=itype)[:, 4096:4096 + dim, :].requires_grad_()
+        x = torch.randn(batch, 4096 + dim + 64, seqlen, device=device, dtype=itype)[:, 4096:4096 + dim, :].requires_grad_()
     else:
         x = rearrange(
-            torch.randn(batch_size, seqlen, 4096 + dim + 64, device=device, dtype=itype)[:, :, 4096:4096 + dim], "b s d -> b d s"
+            torch.randn(batch, seqlen, 4096 + dim + 64, device=device, dtype=itype)[:, :, 4096:4096 + dim], "b s d -> b d s"
         ).requires_grad_()
     weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
     if has_bias:
@@ -93,11 +92,11 @@ def test_causal_conv1d_update(dim, width, has_bias, silu_activation, itype):
     rtolw, atolw = (1e-3, 1e-3)
     # set seed
     torch.random.manual_seed(0)
-    batch_size = 2
-    # batch_size = 1
+    batch = 2
+    # batch = 1
     # dim = 64
-    x = torch.randn(batch_size, dim, device=device, dtype=itype)
-    conv_state = torch.randn(batch_size, dim, width, device=device, dtype=itype)
+    x = torch.randn(batch, dim, device=device, dtype=itype)
+    conv_state = torch.randn(batch, dim, width, device=device, dtype=itype)
     weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
     if has_bias:
         bias = torch.randn(dim, device=device, dtype=torch.float32, requires_grad=True)
@@ -134,15 +133,15 @@ def test_causal_conv1d_race_condition(seqlen, width, has_bias, silu_activation, 
     device = "cuda"
     # set seed
     torch.random.manual_seed(0)
-    batch_size = 2
-    # batch_size = 1
+    batch = 2
+    # batch = 1
     dim = 4096 + 32  # Try dim not divisible by 64
     # dim = 64
     if not channel_last:
-        x = torch.randn(batch_size, 4096 + dim + 64, seqlen, device=device, dtype=itype)[:, 4096:4096 + dim, :].requires_grad_()
+        x = torch.randn(batch, 4096 + dim + 64, seqlen, device=device, dtype=itype)[:, 4096:4096 + dim, :].requires_grad_()
     else:
         x = rearrange(
-            torch.randn(batch_size, seqlen, 4096 + dim + 64, device=device, dtype=itype)[:, :, 4096:4096 + dim], "b s d -> b d s"
+            torch.randn(batch, seqlen, 4096 + dim + 64, device=device, dtype=itype)[:, :, 4096:4096 + dim], "b s d -> b d s"
         ).requires_grad_()
     weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
     if has_bias:

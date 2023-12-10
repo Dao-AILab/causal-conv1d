@@ -258,7 +258,7 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
 
     float bias_val = params.bias_ptr == nullptr || chunk_c_id * kChunkSizeC + row_idx >= params.dim ? 0.f : float(reinterpret_cast<weight_t *>(params.bias_ptr)[chunk_c_id * kChunkSizeC + row_idx]);
     float weight_vals[kWidth] = {0};
-    if (chunk_c_id + kChunkSizeC + row_idx < params.dim) {
+    if (chunk_c_id * kChunkSizeC + row_idx < params.dim) {
         #pragma unroll
         for (int w = 0; w < kWidth; ++w) {
             weight_vals[w] = weight[row_idx * params.weight_c_stride + w * params.weight_width_stride];
