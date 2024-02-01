@@ -1,4 +1,5 @@
-# Copyright (c) 2023, Tri Dao.
+# Copyright (c) 2024, Tri Dao.
+
 import sys
 import warnings
 import os
@@ -17,12 +18,7 @@ import urllib.error
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 import torch
-from torch.utils.cpp_extension import (
-    BuildExtension,
-    CppExtension,
-    CUDAExtension,
-    CUDA_HOME,
-)
+from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME
 
 
 with open("README.md", "r", encoding="utf-8") as fh:
