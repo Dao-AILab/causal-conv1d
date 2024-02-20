@@ -154,6 +154,7 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
 
     if (is_channel_last) {
         TORCH_CHECK(dim % 8 == 0, "causal_conv1d only supports channel dimension divisible by 8 for now");
+        TORCH_CHECK(x.stride(2) % 8 == 0 and x.stride(0) % 8 == 0, "causal_conv1d with channel last layout requires strides (x.stride(0) and x.stride(2)) to be multiples of 8");
     }
     TORCH_CHECK(width >= 2 && width <= 4, "causal_conv1d only supports width between 2 and 4");
 
@@ -235,6 +236,12 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
     const bool is_channel_last = x.stride(1) == 1 && x.stride(2) > 1;
     if (!is_channel_last && dout.stride(2) != 1) { dout = dout.contiguous(); }
     if (is_channel_last && dout.stride(1) != 1) { dout = dout.transpose(-1, -2).contiguous().transpose(-1, -2); }
+
+    if (is_channel_last) {
+        TORCH_CHECK(dim % 8 == 0, "causal_conv1d only supports channel dimension divisible by 8 for now");
+        TORCH_CHECK(x.stride(2) % 8 == 0 and x.stride(0) % 8 == 0, "causal_conv1d with channel last layout requires strides (x.stride(0) and x.stride(2)) to be multiples of 8");
+        TORCH_CHECK(dout.stride(2) % 8 == 0 and dout.stride(0) % 8 == 0, "causal_conv1d with channel last layout requires strides (dout.stride(0) and dout.stride(2)) to be multiples of 8");
+    }
 
     if (bias_.has_value()) {
         auto bias = bias_.value();
