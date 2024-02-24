@@ -506,22 +506,26 @@ template<int kNThreads, int kWidth, typename input_t, typename weight_t>
 void causal_conv1d_channellast_bwd_launch(ConvParamsBwd &params, cudaStream_t stream) {
     BOOL_SWITCH(params.silu_activation, kSiluAct, [&] {
         BOOL_SWITCH(params.seq_idx_ptr != nullptr, kHasSeqIdx, [&] {
-            using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, 64, kSiluAct, true, input_t, weight_t>;
-            // constexpr int kSmemSize = Ktraits::kSmemSize;
-            constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
-            constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
-            const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
-            const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
-            dim3 grid(params.batch, n_chunks_L, n_chunks_C);
-            dim3 block(Ktraits::kNThreads);
-            auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx>;
-            // if (kSmemSize >= 48 * 1024) {
-            //     C10_CUDA_CHECK(cudaFuncSetAttribute(
-            //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            //     }
-            // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-            kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            BOOL_SWITCH(params.seqlen <= 128, kChunkSizeL64, [&] {
+                // kChunkSizeL = 128 is slightly faster than 64 when seqlen is larger
+                static constexpr int kChunk = kChunkSizeL64 ? 64 : 128;
+                using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, kChunk, kSiluAct, true, input_t, weight_t>;
+                // constexpr int kSmemSize = Ktraits::kSmemSize;
+                constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
+                constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
+                const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
+                const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
+                dim3 grid(params.batch, n_chunks_L, n_chunks_C);
+                dim3 block(Ktraits::kNThreads);
+                auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx>;
+                // if (kSmemSize >= 48 * 1024) {
+                //     C10_CUDA_CHECK(cudaFuncSetAttribute(
+                //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+                //     }
+                // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+                kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
         });
     });
 }
