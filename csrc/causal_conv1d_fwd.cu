@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2023, Tri Dao.
+ * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
 
 #include <c10/util/BFloat16.h>
@@ -208,12 +208,12 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
     // Shared memory.
     __shared__ input_t x_smem[kWidth - 1 + kChunkSizeL][kChunkSizeC + kNElts];
 
-    const int tid = threadIdx.x;
-    const int l_idx = tid / kNThreadsPerC;
-    const int c_idx = tid % kNThreadsPerC;
     const int batch_id = blockIdx.x;
     const int chunk_l_id = blockIdx.y;
     const int chunk_c_id = blockIdx.z;
+    const int tid = threadIdx.x;
+    const int l_idx = tid / kNThreadsPerC;
+    const int c_idx = tid % kNThreadsPerC;
     input_t *x = reinterpret_cast<input_t *>(params.x_ptr) + batch_id * params.x_batch_stride
         + (chunk_l_id * kChunkSizeL + l_idx) * params.x_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
     weight_t *weight = reinterpret_cast<weight_t *>(params.weight_ptr)
@@ -222,6 +222,12 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
         + (chunk_l_id * kChunkSizeL + l_idx) * params.out_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
     int *seq_idx = !kHasSeqIdx ? nullptr : reinterpret_cast<int *>(params.seq_idx_ptr)
         + batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
+    input_t *initial_states = params.initial_states_ptr == nullptr || chunk_l_id > 0 ? nullptr
+        : reinterpret_cast<input_t *>(params.initial_states_ptr) + batch_id * params.initial_states_batch_stride + l_idx * params.initial_states_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
+    // The last L-chunk will also have enough info to write to final states, since it also contain a few x values
+    // from the previous L-chunk.
+    input_t *final_states = params.final_states_ptr == nullptr || chunk_l_id < gridDim.y - 1 ? nullptr
+        : reinterpret_cast<input_t *>(params.final_states_ptr) + batch_id * params.final_states_batch_stride + l_idx * params.final_states_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
 
     #pragma unroll
     for (int l = 0; l < Ktraits::kNLoads; ++l) {
@@ -239,11 +245,23 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
             && chunk_l_id * kChunkSizeL + l_idx - (kWidth - 1) < params.seqlen
             && chunk_c_id * kChunkSizeC + c_idx * kNElts < params.dim) {
             reinterpret_cast<vec_t *>(x_vals_load)[0] = *reinterpret_cast<vec_t *>(x - (kWidth - 1) * params.x_l_stride);
+        } else if (initial_states != nullptr
+                   && chunk_l_id * kChunkSizeL + l_idx - (kWidth - 1) < 0
+                   && chunk_c_id * kChunkSizeC + c_idx * kNElts < params.dim) {
+            reinterpret_cast<vec_t *>(x_vals_load)[0] = *reinterpret_cast<vec_t *>(initial_states);
         }
         reinterpret_cast<vec_t *>(x_smem[l_idx])[c_idx] = reinterpret_cast<vec_t *>(x_vals_load)[0];
     }
 
     __syncthreads();
+
+    if (final_states != nullptr
+        && l_idx < kWidth - 1
+        && chunk_c_id * kChunkSizeC + c_idx * kNElts < params.dim) {
+        // x_smem[0] contains element at index chunk_l_id * kChunkSizeL - (kWidth - 1)
+        // So last few elements (index params.seqlen - kWidth + 1 + l_idx) are stored in x_smem[params.seqlen - kWidth + 1 + l_idx - (chunk_l_id * kChunkSizeL - kWidth + 1)][c_idx]
+        *reinterpret_cast<vec_t *>(final_states) = reinterpret_cast<vec_t *>(x_smem[params.seqlen + l_idx - chunk_l_id * kChunkSizeL])[c_idx];
+    }
 
     constexpr int kLPerThread = std::min(kChunkSizeL * kChunkSizeC / kNThreads, kChunkSizeL);
     static_assert(kLPerThread * kNThreads == kChunkSizeL * kChunkSizeC);
@@ -295,8 +313,7 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
         if (params.silu_activation) {out_vals[i] = out_vals[i] / (1 + expf(-out_vals[i])); }
     }
 
-    // Since kNThreadsPerRow is a power of 2 and <= 32, we only need syncwarp and not syncthreads.
-    __syncwarp();
+    __syncthreads();
     #pragma unroll
     for (int i = 0; i < kLPerThread; ++i) { x_smem[col_idx * kLPerThread + i][row_idx] = out_vals[i]; }
     __syncthreads();

@@ -256,7 +256,6 @@ setup(
     install_requires=[
         "torch",
         "packaging",
-        "buildtools",
         "ninja",
     ],
 )

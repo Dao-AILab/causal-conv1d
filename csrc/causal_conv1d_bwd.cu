@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2023, Tri Dao.
+ * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
 
 #include <c10/util/BFloat16.h>
@@ -303,7 +303,7 @@ struct Causal_conv1d_channellast_bwd_kernel_traits {
     // static constexpr int kSmemSize = kChunkSizeL * kNEltsPerRow * kNBytes;
 };
 
-template<typename Ktraits, bool kHasSeqIdx>
+template<typename Ktraits, bool kHasSeqIdx, bool kHasDfinalStates>
 __global__ __launch_bounds__(Ktraits::kNThreads)
 void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
     constexpr int kWidth = Ktraits::kWidth;
@@ -323,12 +323,12 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
     __shared__ input_t dout_smem[kChunkSizeL + kWidth - 1][kChunkSizeC + kNElts];
     __shared__ input_t x_smem[kWidth - 1 + kChunkSizeL + kWidth - 1][kChunkSizeC + kNElts];
 
-    const int tid = threadIdx.x;
-    const int l_idx = tid / kNThreadsPerC;
-    const int c_idx = tid % kNThreadsPerC;
     const int batch_id = blockIdx.x;
     const int chunk_l_id = blockIdx.y;
     const int chunk_c_id = blockIdx.z;
+    const int tid = threadIdx.x;
+    const int l_idx = tid / kNThreadsPerC;
+    const int c_idx = tid % kNThreadsPerC;
     input_t *x = reinterpret_cast<input_t *>(params.x_ptr) + batch_id * params.x_batch_stride
         + (chunk_l_id * kChunkSizeL + l_idx) * params.x_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
     weight_t *weight = reinterpret_cast<weight_t *>(params.weight_ptr)
@@ -341,6 +341,12 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
         + chunk_c_id * kChunkSizeC * params.dweight_c_stride;
     int *seq_idx = !kHasSeqIdx ? nullptr : reinterpret_cast<int *>(params.seq_idx_ptr)
         + batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
+    input_t *initial_states = params.initial_states_ptr == nullptr || chunk_l_id > 0 ? nullptr
+        : reinterpret_cast<input_t *>(params.initial_states_ptr) + batch_id * params.initial_states_batch_stride + l_idx * params.initial_states_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
+    input_t *dinitial_states = params.dinitial_states_ptr == nullptr || chunk_l_id > 0 ? nullptr
+        : reinterpret_cast<input_t *>(params.dinitial_states_ptr) + batch_id * params.dinitial_states_batch_stride + l_idx * params.dinitial_states_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
+    input_t *dfinal_states = params.dfinal_states_ptr == nullptr ? nullptr
+        : reinterpret_cast<input_t *>(params.dfinal_states_ptr) + batch_id * params.dfinal_states_batch_stride + chunk_c_id * kChunkSizeC;
 
     #pragma unroll
     for (int l = 0; l < Ktraits::kNLoads; ++l) {
@@ -366,6 +372,10 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
             && chunk_l_id * kChunkSizeL + l_idx - (kWidth - 1) < params.seqlen
             && chunk_c_id * kChunkSizeC + c_idx * kNElts < params.dim) {
             reinterpret_cast<vec_t *>(x_vals_load)[0] = *reinterpret_cast<vec_t *>(x - (kWidth - 1) * params.x_l_stride);
+        } else if (initial_states != nullptr
+                   && chunk_l_id * kChunkSizeL + l_idx - (kWidth - 1) < 0
+                   && chunk_c_id * kChunkSizeC + c_idx * kNElts < params.dim) {
+            reinterpret_cast<vec_t *>(x_vals_load)[0] = *reinterpret_cast<vec_t *>(initial_states);
         }
         reinterpret_cast<vec_t *>(dout_smem[kChunkSizeL + l_idx])[c_idx] = reinterpret_cast<vec_t *>(dout_vals_load)[0];
         reinterpret_cast<vec_t *>(x_smem[l_idx])[c_idx] = reinterpret_cast<vec_t *>(x_vals_load)[0];
@@ -483,21 +493,59 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
                 dx_vals[i] += seq_idx_thread[kWidth - 1 + i + w] == seq_idx_cur ? weight_vals[kWidth - 1 - w] * dout_vals[i + w] : 0.f;
             }
         }
+        // if (dfinal_states != nullptr) {
+        if constexpr (kHasDfinalStates) {
+            if (chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i >= params.seqlen - kWidth + 1
+                && chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i < params.seqlen
+                && chunk_c_id * kChunkSizeC + row_idx < params.dim) {
+                dx_vals[i] += float(dfinal_states[((chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i) - (params.seqlen - kWidth + 1)) * params.dfinal_states_l_stride + row_idx * params.dfinal_states_c_stride]);
+            }
+        }
     }
-    // Since kNThreadsPerRow is a power of 2 and <= 32, we only need syncwarp and not syncthreads.
-    __syncwarp();
+
+    float dxinit_vals[kWidth - 1] = {0};
+    static_assert(kLPerThread >= kWidth - 1);  // So only threads with col_idx == 0 need to handle dinitial_states
+    if (dinitial_states != nullptr && col_idx == 0) {
+        #pragma unroll
+        for (int i = 0; i < kWidth - 1; ++i) {
+            #pragma unroll
+            for (int w = 0; w < kWidth; ++w) {
+                dxinit_vals[i] += i + w - (kWidth - 1) >= 0 ? weight_vals[kWidth - 1 - w] * dout_vals[i + w - (kWidth - 1)] : 0.f;
+            }
+            // chunk_l_id must be 0 because dinitial_states != nullptr
+            // if (dfinal_states != nullptr) {
+            if constexpr (kHasDfinalStates) {
+                if (i >= params.seqlen) {
+                    dxinit_vals[i] += float(dfinal_states[(i - params.seqlen) * params.dfinal_states_l_stride + row_idx * params.dfinal_states_c_stride]);
+                }
+            }
+        }
+    }
+
+    __syncthreads();
     #pragma unroll
-    for (int i = 0; i < kLPerThread; ++i) { x_smem[col_idx * kLPerThread + i][row_idx] = dx_vals[i]; }
+    for (int i = 0; i < kLPerThread; ++i) { x_smem[kWidth - 1 + col_idx * kLPerThread + i][row_idx] = dx_vals[i]; }
+    if (dinitial_states != nullptr && col_idx == 0) {
+        #pragma unroll
+        for (int i = 0; i < kWidth - 1; ++i) { x_smem[i][row_idx] = dxinit_vals[i]; }
+    }
     __syncthreads();
 
     #pragma unroll
     for (int l = 0; l < Ktraits::kNLoads; ++l) {
         input_t dx_vals_store[kNElts];
-        reinterpret_cast<vec_t *>(dx_vals_store)[0] = reinterpret_cast<vec_t *>(x_smem[l * kLPerLoad + l_idx])[c_idx];
+        reinterpret_cast<vec_t *>(dx_vals_store)[0] = reinterpret_cast<vec_t *>(x_smem[kWidth - 1 + l * kLPerLoad + l_idx])[c_idx];
         if (chunk_l_id * kChunkSizeL + l * kLPerLoad + l_idx < params.seqlen
             && chunk_c_id * kChunkSizeC + c_idx * kNElts < params.dim) {
             *reinterpret_cast<vec_t *>(dx + l * kLPerLoad * params.dx_l_stride) = reinterpret_cast<vec_t *>(dx_vals_store)[0];
         }
+    }
+    if (dinitial_states != nullptr
+        && l_idx < kWidth - 1
+        && chunk_c_id * kChunkSizeC + c_idx * kNElts < params.dim) {
+        input_t dxinit_vals_store[kNElts];
+        reinterpret_cast<vec_t *>(dxinit_vals_store)[0] = reinterpret_cast<vec_t *>(x_smem[l_idx])[c_idx];
+        *reinterpret_cast<vec_t *>(dinitial_states) = reinterpret_cast<vec_t *>(dxinit_vals_store)[0];
     }
 
 }
@@ -506,25 +554,27 @@ template<int kNThreads, int kWidth, typename input_t, typename weight_t>
 void causal_conv1d_channellast_bwd_launch(ConvParamsBwd &params, cudaStream_t stream) {
     BOOL_SWITCH(params.silu_activation, kSiluAct, [&] {
         BOOL_SWITCH(params.seq_idx_ptr != nullptr, kHasSeqIdx, [&] {
-            BOOL_SWITCH(params.seqlen <= 128, kChunkSizeL64, [&] {
-                // kChunkSizeL = 128 is slightly faster than 64 when seqlen is larger
-                static constexpr int kChunk = kChunkSizeL64 ? 64 : 128;
-                using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, kChunk, kSiluAct, true, input_t, weight_t>;
-                // constexpr int kSmemSize = Ktraits::kSmemSize;
-                constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
-                constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
-                const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
-                const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
-                dim3 grid(params.batch, n_chunks_L, n_chunks_C);
-                dim3 block(Ktraits::kNThreads);
-                auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx>;
-                // if (kSmemSize >= 48 * 1024) {
-                //     C10_CUDA_CHECK(cudaFuncSetAttribute(
-                //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-                //     }
-                // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-                kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            BOOL_SWITCH(params.dfinal_states_ptr != nullptr, kHasDfinalStates, [&] {
+                BOOL_SWITCH(params.seqlen <= 128, kChunkSizeL64, [&] {
+                    // kChunkSizeL = 128 is slightly faster than 64 when seqlen is larger
+                    static constexpr int kChunk = kChunkSizeL64 ? 64 : 128;
+                    using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, kChunk, kSiluAct, true, input_t, weight_t>;
+                    // constexpr int kSmemSize = Ktraits::kSmemSize;
+                    constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
+                    constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
+                    const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
+                    const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
+                    dim3 grid(params.batch, n_chunks_L, n_chunks_C);
+                    dim3 block(Ktraits::kNThreads);
+                    auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx, kHasDfinalStates>;
+                    // if (kSmemSize >= 48 * 1024) {
+                    //     C10_CUDA_CHECK(cudaFuncSetAttribute(
+                    //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+                    //     }
+                    // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+                    kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+                });
             });
         });
     });
