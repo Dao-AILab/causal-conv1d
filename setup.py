@@ -18,7 +18,7 @@ import urllib.error
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 import torch
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME
+from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME, ROCM_HOME 
 
 
 with open("README.md", "r", encoding="utf-8") as fh:
@@ -66,15 +66,17 @@ def get_cuda_bare_metal_version(cuda_dir):
     return raw_output, bare_metal_version
 
 
-def check_if_cuda_home_none(global_option: str) -> None:
+def check_if_rocm_or_cuda_home_none(global_option: str) -> None:
+    if ROCM_HOME is not None:
+        print("ROCm is found")
+        return
     if CUDA_HOME is not None:
+        print("CUDA is found")
         return
     # warn instead of error because user could be downloading prebuilt wheels, so nvcc won't be necessary
     # in that case.
     warnings.warn(
-        f"{global_option} was requested, but nvcc was not found.  Are you sure your environment has nvcc available?  "
-        "If you're installing within a container from https://hub.docker.com/r/pytorch/pytorch, "
-        "only images whose names contain 'devel' will provide nvcc."
+        f"{global_option} was requested, but hipcc or nvcc was not found.  Are you sure your environment has hipcc or nvcc available?  "
     )
 
 
@@ -90,64 +92,86 @@ if not SKIP_CUDA_BUILD:
     TORCH_MAJOR = int(torch.__version__.split(".")[0])
     TORCH_MINOR = int(torch.__version__.split(".")[1])
 
-    check_if_cuda_home_none("causal_conv1d")
-    # Check, if CUDA11 is installed for compute capability 8.0
-    cc_flag = []
-    if CUDA_HOME is not None:
-        _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
-        if bare_metal_version < Version("11.6"):
-            raise RuntimeError(
-                "causal_conv1d is only supported on CUDA 11.6 and above.  "
-                "Note: make sure nvcc has a supported version by running nvcc -V."
-            )
-
-    cc_flag.append("-gencode")
-    cc_flag.append("arch=compute_70,code=sm_70")
-    cc_flag.append("-gencode")
-    cc_flag.append("arch=compute_80,code=sm_80")
-    if bare_metal_version >= Version("11.8"):
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_90,code=sm_90")
-
-    # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
-    # torch._C._GLIBCXX_USE_CXX11_ABI
-    # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
-    if FORCE_CXX11_ABI:
-        torch._C._GLIBCXX_USE_CXX11_ABI = True
-
-    ext_modules.append(
-        CUDAExtension(
-            name="causal_conv1d_cuda",
-            sources=[
-                "csrc/causal_conv1d.cpp",
-                "csrc/causal_conv1d_fwd.cu",
-                "csrc/causal_conv1d_bwd.cu",
-                "csrc/causal_conv1d_update.cu",
-            ],
-            extra_compile_args={
-                "cxx": ["-O3"],
-                "nvcc": append_nvcc_threads(
-                    [
-                        "-O3",
-                        "-U__CUDA_NO_HALF_OPERATORS__",
-                        "-U__CUDA_NO_HALF_CONVERSIONS__",
-                        "-U__CUDA_NO_BFLOAT16_OPERATORS__",
-                        "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-                        "-U__CUDA_NO_BFLOAT162_OPERATORS__",
-                        "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
-                        "--expt-relaxed-constexpr",
-                        "--expt-extended-lambda",
-                        "--use_fast_math",
-                        "--ptxas-options=-v",
-                        "-lineinfo",
-                    ]
-                    + cc_flag
-                ),
-            },
-            include_dirs=[Path(this_dir) / "csrc" / "causal_conv1d"],
-        )
+    # Check if ROCM or CUDA available
+    check_if_rocm_or_cuda_home_none("causal_conv1d")
+    
+    # Check pytorch version for rocm
+    is_rocm_pytorch = (
+        True if ((torch.version.hip is not None) and (ROCM_HOME is not None)) else False
     )
+    if is_rocm_pytorch:
+        torch_ver = [int(x) for x in torch.__version__.split(".")[:2]]
+        assert torch_ver >= [1, 8], "ROCM support requires PyTorch >= 1.8!"
+    
+    ### need a stragety to manage the env where rocm and cuda both exist ####
+    
+    # Check, if CUDA11 is installed for compute capability 8.0
+    if (torch.cuda.is_available() and ((CUDA_HOME is not None) or is_rocm_pytorch)):
+        cc_flag = []
+        define_macros = []
+        extra_compile_args = {"cxx": []}
+        if not is_rocm_pytorch:
+            _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
+            if bare_metal_version < Version("11.6"):
+                raise RuntimeError(
+                    "causal_conv1d is only supported on CUDA 11.6 and above.  "
+                    "Note: make sure nvcc has a supported version by running nvcc -V."
+                )
+        # >>> make this part only applied to cuda
+            cc_flag.append("-gencode")
+            cc_flag.append("arch=compute_70,code=sm_70")
+            cc_flag.append("-gencode")
+            cc_flag.append("arch=compute_80,code=sm_80")
+            if bare_metal_version >= Version("11.8"):
+                cc_flag.append("-gencode")
+                cc_flag.append("arch=compute_90,code=sm_90")
 
+            # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
+            # torch._C._GLIBCXX_USE_CXX11_ABI
+            # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
+            if FORCE_CXX11_ABI:
+                torch._C._GLIBCXX_USE_CXX11_ABI = True
+                
+            define_macros += [("WITH_CUDA", None)]
+            extra_compile_args={
+                    "cxx": ["-O3"],
+                    "nvcc": append_nvcc_threads(
+                        [
+                            "-O3",
+                            "-U__CUDA_NO_HALF_OPERATORS__",
+                            "-U__CUDA_NO_HALF_CONVERSIONS__",
+                            "-U__CUDA_NO_BFLOAT16_OPERATORS__",
+                            "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+                            "-U__CUDA_NO_BFLOAT162_OPERATORS__",
+                            "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
+                            "--expt-relaxed-constexpr",
+                            "--expt-extended-lambda",
+                            "--use_fast_math",
+                            "--ptxas-options=-v",
+                            "-lineinfo",
+                        ]
+                        + cc_flag
+                    ),
+                },
+        else:
+            define_macros += [("WITH_HIP", None)]
+            extra_compile_args["nvcc"] = []
+            
+
+        ext_modules.append(
+            CUDAExtension(
+                name="causal_conv1d_cuda",
+                sources=[
+                    "csrc/causal_conv1d.cpp",
+                    "csrc/causal_conv1d_fwd.cu",
+                    "csrc/causal_conv1d_bwd.cu",
+                    "csrc/causal_conv1d_update.cu",
+                ],
+                define_macros=define_macros,
+                extra_compile_args=extra_compile_args,
+                include_dirs=[Path(this_dir) / "csrc" / "causal_conv1d"],
+            )
+        )
 
 def get_package_version():
     with open(Path(this_dir) / "causal_conv1d" / "__init__.py", "r") as f:
@@ -164,17 +188,18 @@ def get_wheel_url():
     # Determine the version numbers that will be used to determine the correct wheel
     # We're using the CUDA version used to build torch, not the one currently installed
     # _, cuda_version_raw = get_cuda_bare_metal_version(CUDA_HOME)
-    torch_cuda_version = parse(torch.version.cuda)
+    # torch_cuda_version = parse(torch.version.cuda)
     torch_version_raw = parse(torch.__version__)
     # For CUDA 11, we only compile for CUDA 11.8, and for CUDA 12 we only compile for CUDA 12.2
     # to save CI time. Minor versions should be compatible.
-    torch_cuda_version = parse("11.8") if torch_cuda_version.major == 11 else parse("12.2")
+    # torch_cuda_version = parse("11.8") if torch_cuda_version.major == 11 else parse("12.2")
     python_version = f"cp{sys.version_info.major}{sys.version_info.minor}"
     platform_name = get_platform()
     causal_conv1d_version = get_package_version()
     # cuda_version = f"{cuda_version_raw.major}{cuda_version_raw.minor}"
-    cuda_version = f"{torch_cuda_version.major}{torch_cuda_version.minor}"
+    # cuda_version = f"{torch_cuda_version.major}{torch_cuda_version.minor}"
     torch_version = f"{torch_version_raw.major}.{torch_version_raw.minor}"
+    cuda_version="rocm5.70"
     cxx11_abi = str(torch._C._GLIBCXX_USE_CXX11_ABI).upper()
 
     # Determine wheel URL based on CUDA version, torch version, python version and OS
