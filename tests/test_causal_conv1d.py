@@ -22,9 +22,7 @@ from causal_conv1d.causal_conv1d_interface import causal_conv1d_update, causal_c
 # @pytest.mark.parametrize("channel_last", [False, True])
 @pytest.mark.parametrize("channel_last", [False])
 # @pytest.mark.parametrize('channel_last', [True])
-# TODO modifying test for minimal
-# @pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("itype", [torch.float32, torch.float16])
+@pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
 # @pytest.mark.parametrize('itype', [torch.float16])
 @pytest.mark.parametrize("silu_activation", [False, True])
 # @pytest.mark.parametrize('silu_activation', [True])

@@ -11,37 +11,14 @@
 
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
-// #define DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(ITYPE, NAME, ...)                    \
-//     if (ITYPE == at::ScalarType::Half) {                                            \
-//         using input_t = at::Half;                                                   \
-//         __VA_ARGS__();                                                              \
-//     } else if (ITYPE == at::ScalarType::BFloat16) {                                 \
-//         using input_t = at::BFloat16;                                               \
-//         __VA_ARGS__();                                                              \
-//     } else if (ITYPE == at::ScalarType::Float)  {                                   \
-//         using input_t = float;                                                      \
-//         __VA_ARGS__();                                                              \
-//     } else {                                                                        \
-//         AT_ERROR(#NAME, " not implemented for input type '", toString(ITYPE), "'"); \
-//     }
-
-// #define DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(WTYPE, NAME, ...)                     \
-//     if (WTYPE == at::ScalarType::Half) {                                             \
-//         using weight_t = at::Half;                                                   \
-//         __VA_ARGS__();                                                               \
-//     } else if (WTYPE == at::ScalarType::BFloat16) {                                  \
-//         using weight_t = at::BFloat16;                                               \
-//         __VA_ARGS__();                                                               \
-//     } else if (WTYPE == at::ScalarType::Float)  {                                    \
-//         using weight_t = float;                                                      \
-//         __VA_ARGS__();                                                               \
-//     } else {                                                                         \
-//         AT_ERROR(#NAME, " not implemented for weight type '", toString(WTYPE), "'"); \
-//     }
-
-
 #define DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(ITYPE, NAME, ...)                    \
-    if (ITYPE == at::ScalarType::Float)  {                                   \
+    if (ITYPE == at::ScalarType::Half) {                                            \
+        using input_t = at::Half;                                                   \
+        __VA_ARGS__();                                                              \
+    } else if (ITYPE == at::ScalarType::BFloat16) {                                 \
+        using input_t = at::BFloat16;                                               \
+        __VA_ARGS__();                                                              \
+    } else if (ITYPE == at::ScalarType::Float)  {                                   \
         using input_t = float;                                                      \
         __VA_ARGS__();                                                              \
     } else {                                                                        \
@@ -49,7 +26,13 @@
     }
 
 #define DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(WTYPE, NAME, ...)                     \
-    if (WTYPE == at::ScalarType::Float)  {                                    \
+    if (WTYPE == at::ScalarType::Half) {                                             \
+        using weight_t = at::Half;                                                   \
+        __VA_ARGS__();                                                               \
+    } else if (WTYPE == at::ScalarType::BFloat16) {                                  \
+        using weight_t = at::BFloat16;                                               \
+        __VA_ARGS__();                                                               \
+    } else if (WTYPE == at::ScalarType::Float)  {                                    \
         using weight_t = float;                                                      \
         __VA_ARGS__();                                                               \
     } else {                                                                         \
