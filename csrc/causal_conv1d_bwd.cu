@@ -6,13 +6,33 @@
 #include <c10/util/Half.h>
 #include <c10/cuda/CUDAException.h>  // For C10_CUDA_CHECK and C10_CUDA_KERNEL_LAUNCH_CHECK
 
-#include <cub/block/block_load.cuh>
-#include <cub/block/block_store.cuh>
-#include <cub/block/block_reduce.cuh>
+#include <hipcub/hipcub.hpp>
+// #include <cub/block/block_load.cuh>
+// #include <cub/block/block_store.cuh>
+// #include <cub/block/block_reduce.cuh>
 
 #include "causal_conv1d.h"
 #include "causal_conv1d_common.h"
 #include "static_switch.h"
+
+#include <algorithm>
+
+
+// TODO (two lines below): remove, here for debugging only
+#include <stdio.h>
+#include <typeinfo>
+
+
+constexpr size_t my_max(std::initializer_list<size_t> ilist)
+{
+    return *std::max_element(ilist.begin(), ilist.end());
+}
+
+// added adeem
+template<typename T>
+constexpr T constexpr_min(T a, T b) {
+    return a < b ? a : b;
+}
 
 template<int kNThreads_, int kWidth_, bool kSiluAct_, bool kIsVecLoad_, typename input_t_, typename weight_t_>
 struct Causal_conv1d_bwd_kernel_traits {
@@ -30,16 +50,16 @@ struct Causal_conv1d_bwd_kernel_traits {
     static constexpr int kNExchangeRounds = sizeof(float) / sizeof(input_t);
     static constexpr bool kIsVecLoad = kIsVecLoad_;
     using vec_t = typename BytesToType<kNBytes * kNElts>::Type;
-    using BlockLoadT = cub::BlockLoad<input_t, kNThreads, kNElts, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
-    using BlockLoadVecT = cub::BlockLoad<vec_t, kNThreads, 1, cub::BLOCK_LOAD_DIRECT>;
-    using BlockStoreT = cub::BlockStore<input_t, kNThreads, kNElts, cub::BLOCK_STORE_WARP_TRANSPOSE>;
-    using BlockStoreVecT = cub::BlockStore<vec_t, kNThreads, 1, cub::BLOCK_STORE_DIRECT>;
-    using BlockReduceFloatT = cub::BlockReduce<float, kNThreads>;
+    using BlockLoadT = hipcub::BlockLoad<input_t, kNThreads, kNElts, hipcub::BLOCK_LOAD_WARP_TRANSPOSE>;
+    using BlockLoadVecT = hipcub::BlockLoad<vec_t, kNThreads, 1, hipcub::BLOCK_LOAD_DIRECT>;
+    using BlockStoreT = hipcub::BlockStore<input_t, kNThreads, kNElts, hipcub::BLOCK_STORE_WARP_TRANSPOSE>;
+    using BlockStoreVecT = hipcub::BlockStore<vec_t, kNThreads, 1, hipcub::BLOCK_STORE_DIRECT>;
+    using BlockReduceFloatT = hipcub::BlockReduce<float, kNThreads>;
     static constexpr int kSmemIOSize = kIsVecLoad
         ? 0
-        : std::max({sizeof(typename BlockLoadT::TempStorage), sizeof(typename BlockStoreT::TempStorage)});
+        : my_max({sizeof(typename BlockLoadT::TempStorage), sizeof(typename BlockStoreT::TempStorage)});
     static constexpr int kSmemExchangeSize = kNThreads * kNBytes * kNElts * (!kSiluAct ? 1 : kNExchangeRounds + 1);
-    static constexpr int kSmemSize = std::max({kSmemExchangeSize,
+    static constexpr int kSmemSize = my_max({kSmemExchangeSize,
             int(sizeof(typename BlockReduceFloatT::TempStorage))}) + (kIsVecLoad ? 0 : kSmemIOSize);
 };
 
@@ -109,13 +129,13 @@ void causal_conv1d_bwd_kernel(ConvParamsBwd params) {
         input_t x_vals_load[2 * kNElts] = {0};
         input_t dout_vals_load[2 * kNElts] = {0};
         if constexpr(kIsVecLoad) {
-            Ktraits::BlockLoadVecT(smem_load_vec).Load(reinterpret_cast<vec_t*>(x), *reinterpret_cast<vec_t (*)[1]>(&x_vals_load[kNElts]), (params.seqlen - chunk * kChunkSize) / kNElts);
-            Ktraits::BlockLoadVecT(smem_load_vec).Load(reinterpret_cast<vec_t*>(dout), *reinterpret_cast<vec_t (*)[1]>(&dout_vals_load[0]), (params.seqlen - chunk * kChunkSize) / kNElts);
+            typename Ktraits::BlockLoadVecT(smem_load_vec).Load(reinterpret_cast<vec_t*>(x), *reinterpret_cast<vec_t (*)[1]>(&x_vals_load[kNElts]), (params.seqlen - chunk * kChunkSize) / kNElts);
+            typename Ktraits::BlockLoadVecT(smem_load_vec).Load(reinterpret_cast<vec_t*>(dout), *reinterpret_cast<vec_t (*)[1]>(&dout_vals_load[0]), (params.seqlen - chunk * kChunkSize) / kNElts);
         } else {
             __syncthreads();
-            Ktraits::BlockLoadT(smem_load).Load(x, *reinterpret_cast<input_t (*)[kNElts]>(&x_vals_load[kNElts]), params.seqlen - chunk * kChunkSize);
+            typename Ktraits::BlockLoadT(smem_load).Load(x, *reinterpret_cast<input_t (*)[kNElts]>(&x_vals_load[kNElts]), params.seqlen - chunk * kChunkSize);
             __syncthreads();
-            Ktraits::BlockLoadT(smem_load).Load(dout, *reinterpret_cast<input_t (*)[kNElts]>(&dout_vals_load[0]), params.seqlen - chunk * kChunkSize);
+            typename Ktraits::BlockLoadT(smem_load).Load(dout, *reinterpret_cast<input_t (*)[kNElts]>(&dout_vals_load[0]), params.seqlen - chunk * kChunkSize);
         }
         float dout_vals[2 * kNElts], x_vals[2 * kNElts];
         if constexpr (!kSiluAct) {
@@ -207,9 +227,9 @@ void causal_conv1d_bwd_kernel(ConvParamsBwd params) {
         #pragma unroll
         for (int i = 0; i < kNElts; ++i) { dx_vals_store[i] = dx_vals[i]; }
         if constexpr(kIsVecLoad) {
-            Ktraits::BlockStoreVecT(smem_store_vec).Store(reinterpret_cast<vec_t*>(dx), reinterpret_cast<vec_t (&)[1]>(dx_vals_store), (params.seqlen - chunk * kChunkSize) / kNElts);
+            typename Ktraits::BlockStoreVecT(smem_store_vec).Store(reinterpret_cast<vec_t*>(dx), reinterpret_cast<vec_t (&)[1]>(dx_vals_store), (params.seqlen - chunk * kChunkSize) / kNElts);
         } else {
-            Ktraits::BlockStoreT(smem_store).Store(dx, dx_vals_store, params.seqlen - chunk * kChunkSize);
+            typename Ktraits::BlockStoreT(smem_store).Store(dx, dx_vals_store, params.seqlen - chunk * kChunkSize);
         }
         dx -= kChunkSize;
 
@@ -225,14 +245,14 @@ void causal_conv1d_bwd_kernel(ConvParamsBwd params) {
     #pragma unroll
     for (int w = 0; w < kWidth; ++w) {
         __syncthreads();
-        dweight_vals[w] = Ktraits::BlockReduceFloatT(smem_reduce_float).Sum(dweight_vals[w]);
+        dweight_vals[w] = typename Ktraits::BlockReduceFloatT(smem_reduce_float).Sum(dweight_vals[w]);
         if (tidx == 0) {
             atomicAdd(&reinterpret_cast<float *>(dweight)[w * params.dweight_width_stride], dweight_vals[w]);
         }
     }
     if (params.bias_ptr != nullptr) {
         __syncthreads();
-        dbias_val = Ktraits::BlockReduceFloatT(smem_reduce_float).Sum(dbias_val);
+        dbias_val = typename Ktraits::BlockReduceFloatT(smem_reduce_float).Sum(dbias_val);
         if (tidx == 0) {
             atomicAdd(&reinterpret_cast<float *>(params.dbias_ptr)[dim_id], dbias_val);
         }
@@ -247,12 +267,29 @@ void causal_conv1d_bwd_launch(ConvParamsBwd &params, cudaStream_t stream) {
             using Ktraits = Causal_conv1d_bwd_kernel_traits<kNThreads, kWidth, kSiluAct, kIsVecLoad, input_t, weight_t>;
             constexpr int kSmemSize = Ktraits::kSmemSize;
             dim3 grid(params.batch, params.dim);
-            auto kernel = &causal_conv1d_bwd_kernel<Ktraits>;
+            // auto kernel = &causal_conv1d_bwd_kernel<Ktraits>;
+
+            // Had to change this substantially since potentially the hip 
+            // interface for setting kernel launch attributes is slightly different from 
+            // cuda's. In particualar, it seems to expect a plain const void * pointer.
+
+
+            // // TODO: this does not properly allocate shared memory, fix.
+            const void * kernel = (void*) &causal_conv1d_bwd_kernel<Ktraits>; // TODO: change to reinterpret cast.
+
             if (kSmemSize >= 48 * 1024) {
                 C10_CUDA_CHECK(cudaFuncSetAttribute(
                     kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
                 }
-            kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+        
+            auto kernel_fn = (void (*const)(ConvParamsBwd)) kernel; // Todo - double-check. Had to add this C-style conversion. // TODO: change to reinterpret cast?
+
+            // TODO: remove and replace with the above
+            // auto kernel_fn = &selective_scan_fwd_kernel<Ktraits>;
+            
+            
+            kernel_fn<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+            // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
     });
@@ -296,8 +333,8 @@ struct Causal_conv1d_channellast_bwd_kernel_traits {
     static_assert(kNLoads * kNColsPerLoad == kChunkSizeL);
     static constexpr bool kIsVecLoad = kIsVecLoad_;
     using vec_t = typename BytesToType<kNBytes * kNElts>::Type;
-    // using BlockLoadT = cub::BlockLoad<input_t, kNThreads, kNItems, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
-    // using BlockStoreT = cub::BlockStore<input_t, kNThreads, kNItems, cub::BLOCK_STORE_WARP_TRANSPOSE>;
+    // using BlockLoadT = hipcub::BlockLoad<input_t, kNThreads, kNItems, hipcub::BLOCK_LOAD_WARP_TRANSPOSE>;
+    // using BlockStoreT = hipcub::BlockStore<input_t, kNThreads, kNItems, hipcub::BLOCK_STORE_WARP_TRANSPOSE>;
     // static constexpr int kSmemSize = std::max({sizeof(typename BlockLoadT::TempStorage),
     //                                            sizeof(typename BlockStoreT::TempStorage)});
     // static constexpr int kSmemSize = kChunkSizeL * kNEltsPerRow * kNBytes;
@@ -394,7 +431,7 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
 
     __syncthreads();
 
-    constexpr int kLPerThread = std::min(kChunkSizeL * kChunkSizeC / kNThreads, kChunkSizeL);
+    constexpr int kLPerThread = constexpr_min(kChunkSizeL * kChunkSizeC / kNThreads, kChunkSizeL);
     static_assert(kLPerThread * kNThreads == kChunkSizeL * kChunkSizeC);
     constexpr int kNThreadsPerRow = kChunkSizeL / kLPerThread;
     static_assert(kNThreadsPerRow * kLPerThread == kChunkSizeL);
@@ -566,13 +603,24 @@ void causal_conv1d_channellast_bwd_launch(ConvParamsBwd &params, cudaStream_t st
                     const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
                     dim3 grid(params.batch, n_chunks_L, n_chunks_C);
                     dim3 block(Ktraits::kNThreads);
-                    auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx, kHasDfinalStates>;
+                    // auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx, kHasDfinalStates>;
+
+                    // Had to change this substantially since potentially the hip 
+                    // interface for setting kernel launch attributes is slightly different from 
+                    // cuda's. In particualar, it seems to expect a plain const void * pointer.
+
+
+                    // // TODO: this does not properly allocate shared memory, fix.
+                    const void * kernel = (void*) &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx, kHasDfinalStates>;// TODO: change to reinterpret cast.
                     // if (kSmemSize >= 48 * 1024) {
                     //     C10_CUDA_CHECK(cudaFuncSetAttribute(
                     //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
                     //     }
+                    auto kernel_fn = (void (*const)(ConvParamsBwd)) kernel; // Todo - double-check. Had to add this C-style conversion. // TODO: change to reinterpret cast?
+
                     // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-                    kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
+                    // kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
+                    kernel_fn<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
                     C10_CUDA_KERNEL_LAUNCH_CHECK();
                 });
             });

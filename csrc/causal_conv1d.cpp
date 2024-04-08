@@ -11,14 +11,37 @@
 
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
+// #define DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(ITYPE, NAME, ...)                    \
+//     if (ITYPE == at::ScalarType::Half) {                                            \
+//         using input_t = at::Half;                                                   \
+//         __VA_ARGS__();                                                              \
+//     } else if (ITYPE == at::ScalarType::BFloat16) {                                 \
+//         using input_t = at::BFloat16;                                               \
+//         __VA_ARGS__();                                                              \
+//     } else if (ITYPE == at::ScalarType::Float)  {                                   \
+//         using input_t = float;                                                      \
+//         __VA_ARGS__();                                                              \
+//     } else {                                                                        \
+//         AT_ERROR(#NAME, " not implemented for input type '", toString(ITYPE), "'"); \
+//     }
+
+// #define DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(WTYPE, NAME, ...)                     \
+//     if (WTYPE == at::ScalarType::Half) {                                             \
+//         using weight_t = at::Half;                                                   \
+//         __VA_ARGS__();                                                               \
+//     } else if (WTYPE == at::ScalarType::BFloat16) {                                  \
+//         using weight_t = at::BFloat16;                                               \
+//         __VA_ARGS__();                                                               \
+//     } else if (WTYPE == at::ScalarType::Float)  {                                    \
+//         using weight_t = float;                                                      \
+//         __VA_ARGS__();                                                               \
+//     } else {                                                                         \
+//         AT_ERROR(#NAME, " not implemented for weight type '", toString(WTYPE), "'"); \
+//     }
+
+
 #define DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(ITYPE, NAME, ...)                    \
-    if (ITYPE == at::ScalarType::Half) {                                            \
-        using input_t = at::Half;                                                   \
-        __VA_ARGS__();                                                              \
-    } else if (ITYPE == at::ScalarType::BFloat16) {                                 \
-        using input_t = at::BFloat16;                                               \
-        __VA_ARGS__();                                                              \
-    } else if (ITYPE == at::ScalarType::Float)  {                                   \
+    if (ITYPE == at::ScalarType::Float)  {                                   \
         using input_t = float;                                                      \
         __VA_ARGS__();                                                              \
     } else {                                                                        \
@@ -26,13 +49,7 @@
     }
 
 #define DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(WTYPE, NAME, ...)                     \
-    if (WTYPE == at::ScalarType::Half) {                                             \
-        using weight_t = at::Half;                                                   \
-        __VA_ARGS__();                                                               \
-    } else if (WTYPE == at::ScalarType::BFloat16) {                                  \
-        using weight_t = at::BFloat16;                                               \
-        __VA_ARGS__();                                                               \
-    } else if (WTYPE == at::ScalarType::Float)  {                                    \
+    if (WTYPE == at::ScalarType::Float)  {                                    \
         using weight_t = float;                                                      \
         __VA_ARGS__();                                                               \
     } else {                                                                         \
@@ -41,13 +58,14 @@
 
 template<typename input_t, typename weight_t>
 void causal_conv1d_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
-template <typename input_t, typename weight_t>
-void causal_conv1d_channellast_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
+// template <typename input_t, typename weight_t>
+// void causal_conv1d_channellast_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
 
-template<typename input_t, typename weight_t>
-void causal_conv1d_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
-template<typename input_t, typename weight_t>
-void causal_conv1d_channellast_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
+// TODO: for minimal
+// template<typename input_t, typename weight_t>
+// void causal_conv1d_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
+// template<typename input_t, typename weight_t>
+// void causal_conv1d_channellast_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
 
 template<typename input_t, typename weight_t>
 void causal_conv1d_update_cuda(ConvParamsBase &params, cudaStream_t stream);
@@ -228,8 +246,8 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
         DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_fwd", [&] {
             if (!is_channel_last) {
                 causal_conv1d_fwd_cuda<input_t, weight_t>(params, stream);
-            } else {
-                causal_conv1d_channellast_fwd_cuda<input_t, weight_t>(params, stream);
+            // } else {
+            //     causal_conv1d_channellast_fwd_cuda<input_t, weight_t>(params, stream);
             }
         });
     });
@@ -368,16 +386,16 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
         params.dinitial_states_ptr = nullptr;
     }
 
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
-    DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_bwd", [&] {
-        DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_bwd", [&] {
-            if (!is_channel_last) {
-                causal_conv1d_bwd_cuda<input_t, weight_t>(params, stream);
-            } else {
-                causal_conv1d_channellast_bwd_cuda<input_t, weight_t>(params, stream);
-            }
-        });
-    });
+    // auto stream = at::cuda::getCurrentCUDAStream().stream();
+    // DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_bwd", [&] {
+    //     DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_bwd", [&] {
+    //         if (!is_channel_last) {
+    //             causal_conv1d_bwd_cuda<input_t, weight_t>(params, stream);
+    //         } else {
+    //             causal_conv1d_channellast_bwd_cuda<input_t, weight_t>(params, stream);
+    //         }
+    //     });
+    // });
     return {dx, dweight.to(weight.dtype()), bias_.has_value() ? dbias.to(bias_.value().dtype()) : dbias, dinitial_states};
 }
 
@@ -430,13 +448,13 @@ causal_conv1d_update(const at::Tensor &x,
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)x.get_device()};
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
-    DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_update", [&] {
-        DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_update", [&] {
-            causal_conv1d_update_cuda<input_t, weight_t>(params, stream);
-        });
-    });
+    // at::cuda::CUDAGuard device_guard{(char)x.get_device()};
+    // auto stream = at::cuda::getCurrentCUDAStream().stream();
+    // DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_update", [&] {
+    //     DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_update", [&] {
+    //         causal_conv1d_update_cuda<input_t, weight_t>(params, stream);
+    //     });
+    // });
     return out;
 }
 
