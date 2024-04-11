@@ -12,15 +12,12 @@ from einops import rearrange, repeat
 from causal_conv1d.causal_conv1d_interface import causal_conv1d_fn, causal_conv1d_ref
 from causal_conv1d.causal_conv1d_interface import causal_conv1d_update, causal_conv1d_update_ref
 
-# TODO modifying test for minimal
-@pytest.mark.parametrize("return_final_states", [False])
+
+@pytest.mark.parametrize("return_final_states", [False, True])
 # @pytest.mark.parametrize("return_final_states", [True])
-# TODO modifying test for minimal
-@pytest.mark.parametrize("has_initial_states", [False])
+@pytest.mark.parametrize("has_initial_states", [False, True])
 # @pytest.mark.parametrize("has_initial_states", [False])
-# TODO modifying test for minimal
-# @pytest.mark.parametrize("channel_last", [False, True])
-@pytest.mark.parametrize("channel_last", [False])
+@pytest.mark.parametrize("channel_last", [False, True])
 # @pytest.mark.parametrize('channel_last', [True])
 @pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
 # @pytest.mark.parametrize('itype', [torch.float16])
@@ -30,12 +27,8 @@ from causal_conv1d.causal_conv1d_interface import causal_conv1d_update, causal_c
 # @pytest.mark.parametrize('has_bias', [True])
 @pytest.mark.parametrize("width", [2, 3, 4])
 # @pytest.mark.parametrize('width', [3])
-# TODO modifying test for minimal
-# @pytest.mark.parametrize(
-#     "seqlen", [1, 2, 8, 16, 32, 64, 128, 129, 130, 151, 256, 372, 512, 784, 1024, 1134, 2048, 4096]
-# )
 @pytest.mark.parametrize(
-    "seqlen", [129, 130, 151]
+    "seqlen", [1, 2, 8, 16, 32, 64, 128, 129, 130, 151, 256, 372, 512, 784, 1024, 1134, 2048, 4096]
 )
 # @pytest.mark.parametrize('seqlen', [8, 16, 32, 64, 128, 256, 512, 784, 1024, 2048, 4096])
 # @pytest.mark.parametrize('seqlen', [128])

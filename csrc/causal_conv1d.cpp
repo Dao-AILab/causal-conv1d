@@ -41,8 +41,8 @@
 
 template<typename input_t, typename weight_t>
 void causal_conv1d_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
-// template <typename input_t, typename weight_t>
-// void causal_conv1d_channellast_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
+template <typename input_t, typename weight_t>
+void causal_conv1d_channellast_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
 
 // TODO: for minimal
 // template<typename input_t, typename weight_t>
@@ -229,8 +229,8 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
         DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_fwd", [&] {
             if (!is_channel_last) {
                 causal_conv1d_fwd_cuda<input_t, weight_t>(params, stream);
-            // } else {
-            //     causal_conv1d_channellast_fwd_cuda<input_t, weight_t>(params, stream);
+            } else {
+                causal_conv1d_channellast_fwd_cuda<input_t, weight_t>(params, stream);
             }
         });
     });
@@ -443,6 +443,6 @@ causal_conv1d_update(const at::Tensor &x,
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("causal_conv1d_fwd", &causal_conv1d_fwd, "Causal conv1d forward");
-    m.def("causal_conv1d_bwd", &causal_conv1d_bwd, "Causal conv1d backward");
-    m.def("causal_conv1d_update", &causal_conv1d_update, "Causal conv1d update");
+    // m.def("causal_conv1d_bwd", &causal_conv1d_bwd, "Causal conv1d backward");
+    // m.def("causal_conv1d_update", &causal_conv1d_update, "Causal conv1d update");
 }

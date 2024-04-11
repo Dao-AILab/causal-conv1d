@@ -166,6 +166,7 @@ if not SKIP_CUDA_BUILD:
     ###FROM XFORMER:
     extra_compile_args = {
         "cxx": ["-O3", "-std=c++17"] + generator_flag,
+        # "cxx": ["-O3"] + generator_flag,
         "nvcc": [
             "-O3",
             "-std=c++17",
@@ -175,6 +176,7 @@ if not SKIP_CUDA_BUILD:
             "-U__CUDA_NO_HALF_CONVERSIONS__",
             "-DCK_FMHA_FWD_FAST_EXP2=1",
             "-fgpu-flush-denormals-to-zero",
+            "-DUSE_ROCM=1",
         ]
         + generator_flag
         + cc_flag,
