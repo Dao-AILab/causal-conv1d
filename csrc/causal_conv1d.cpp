@@ -444,5 +444,5 @@ causal_conv1d_update(const at::Tensor &x,
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("causal_conv1d_fwd", &causal_conv1d_fwd, "Causal conv1d forward");
     // m.def("causal_conv1d_bwd", &causal_conv1d_bwd, "Causal conv1d backward");
-    // m.def("causal_conv1d_update", &causal_conv1d_update, "Causal conv1d update");
+    m.def("causal_conv1d_update", &causal_conv1d_update, "Causal conv1d update");
 }

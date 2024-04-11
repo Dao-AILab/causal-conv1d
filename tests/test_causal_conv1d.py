@@ -103,44 +103,44 @@ def test_causal_conv1d(dim, seqlen, width, has_bias, silu_activation, itype, cha
     # if has_initial_states:
     #     assert torch.allclose(initial_states.grad, initial_states_ref.grad.to(dtype=itype), rtol=rtol, atol=atol)
 
-# # TODO modifying test for minimal
-# @pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
-# # @pytest.mark.parametrize('itype', [torch.float16])
-# @pytest.mark.parametrize("silu_activation", [False, True])
-# # @pytest.mark.parametrize('silu_activation', [False])
-# @pytest.mark.parametrize("has_bias", [False, True])
-# # @pytest.mark.parametrize('has_bias', [True])
-# @pytest.mark.parametrize("width", [2, 3, 4])
-# # @pytest.mark.parametrize('width', [2])
-# @pytest.mark.parametrize("dim", [2048, 2048 + 16, 4096])
-# # @pytest.mark.parametrize("dim", [2048])
-# def test_causal_conv1d_update(dim, width, has_bias, silu_activation, itype):
-#     device = "cuda"
-#     rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (3e-3, 5e-3)
-#     if itype == torch.bfloat16:
-#         rtol, atol = 1e-2, 5e-2
-#     rtolw, atolw = (1e-3, 1e-3)
-#     # set seed
-#     torch.random.manual_seed(0)
-#     batch = 2
-#     # batch = 1
-#     # dim = 64
-#     x = torch.randn(batch, dim, device=device, dtype=itype)
-#     conv_state = torch.randn(batch, dim, width, device=device, dtype=itype)
-#     weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
-#     if has_bias:
-#         bias = torch.randn(dim, device=device, dtype=torch.float32, requires_grad=True)
-#     else:
-#         bias = None
-#     conv_state_ref = conv_state.detach().clone()
-#     activation = None if not silu_activation else "silu"
-#     out = causal_conv1d_update(x, conv_state, weight, bias, activation=activation)
-#     out_ref = causal_conv1d_update_ref(x, conv_state_ref, weight, bias, activation=activation)
+# TODO modifying test for minimal
+@pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
+# @pytest.mark.parametrize('itype', [torch.float16])
+@pytest.mark.parametrize("silu_activation", [False, True])
+# @pytest.mark.parametrize('silu_activation', [False])
+@pytest.mark.parametrize("has_bias", [False, True])
+# @pytest.mark.parametrize('has_bias', [True])
+@pytest.mark.parametrize("width", [2, 3, 4])
+# @pytest.mark.parametrize('width', [2])
+@pytest.mark.parametrize("dim", [2048, 2048 + 16, 4096])
+# @pytest.mark.parametrize("dim", [2048])
+def test_causal_conv1d_update(dim, width, has_bias, silu_activation, itype):
+    device = "cuda"
+    rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (3e-3, 5e-3)
+    if itype == torch.bfloat16:
+        rtol, atol = 1e-2, 5e-2
+    rtolw, atolw = (1e-3, 1e-3)
+    # set seed
+    torch.random.manual_seed(0)
+    batch = 2
+    # batch = 1
+    # dim = 64
+    x = torch.randn(batch, dim, device=device, dtype=itype)
+    conv_state = torch.randn(batch, dim, width, device=device, dtype=itype)
+    weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
+    if has_bias:
+        bias = torch.randn(dim, device=device, dtype=torch.float32, requires_grad=True)
+    else:
+        bias = None
+    conv_state_ref = conv_state.detach().clone()
+    activation = None if not silu_activation else "silu"
+    out = causal_conv1d_update(x, conv_state, weight, bias, activation=activation)
+    out_ref = causal_conv1d_update_ref(x, conv_state_ref, weight, bias, activation=activation)
 
-#     print(f"Output max diff: {(out - out_ref).abs().max().item()}")
-#     print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
-#     assert torch.equal(conv_state, conv_state_ref)
-#     assert torch.allclose(out, out_ref, rtol=rtol, atol=atol)
+    print(f"Output max diff: {(out - out_ref).abs().max().item()}")
+    print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
+    assert torch.equal(conv_state, conv_state_ref)
+    assert torch.allclose(out, out_ref, rtol=rtol, atol=atol)
 
 # TODO modifying test for minimal
 # # @pytest.mark.parametrize("channel_last", [False, True])
