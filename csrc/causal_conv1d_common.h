@@ -50,7 +50,9 @@ struct Allreduce {
     template<typename T, typename Operator>
     static __device__ inline T run(T x, Operator &op) {
         constexpr int OFFSET = THREADS / 2;
-        x = op(x, __shfl_xor_sync(uint32_t(-1), x, OFFSET));
+        // TODO: document this
+        // x = op(x, __shfl_xor_sync(uint32_t(-1), x, OFFSET));
+        x = op(x, __shfl_xor(x, OFFSET)); // 
         return Allreduce<OFFSET>::run(x, op);
     }
 };
@@ -59,7 +61,9 @@ template<>
 struct Allreduce<2> {
 template<typename T, typename Operator>
 static __device__ inline T run(T x, Operator &op) {
-    x = op(x, __shfl_xor_sync(uint32_t(-1), x, 1));
+    // TODO: document this
+    // x = op(x, __shfl_xor_sync(uint32_t(-1), x, 1));
+    x = op(x, __shfl_xor(x, 1)); // 
     return x;
 }
 };

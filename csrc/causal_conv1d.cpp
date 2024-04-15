@@ -45,10 +45,10 @@ template <typename input_t, typename weight_t>
 void causal_conv1d_channellast_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
 
 // TODO: for minimal
-// template<typename input_t, typename weight_t>
-// void causal_conv1d_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
-// template<typename input_t, typename weight_t>
-// void causal_conv1d_channellast_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
+template<typename input_t, typename weight_t>
+void causal_conv1d_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
+template<typename input_t, typename weight_t>
+void causal_conv1d_channellast_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
 
 template<typename input_t, typename weight_t>
 void causal_conv1d_update_cuda(ConvParamsBase &params, cudaStream_t stream);
@@ -369,16 +369,16 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
         params.dinitial_states_ptr = nullptr;
     }
 
-    // auto stream = at::cuda::getCurrentCUDAStream().stream();
-    // DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_bwd", [&] {
-    //     DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_bwd", [&] {
-    //         if (!is_channel_last) {
-    //             causal_conv1d_bwd_cuda<input_t, weight_t>(params, stream);
-    //         } else {
-    //             causal_conv1d_channellast_bwd_cuda<input_t, weight_t>(params, stream);
-    //         }
-    //     });
-    // });
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_bwd", [&] {
+        DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_bwd", [&] {
+            if (!is_channel_last) {
+                causal_conv1d_bwd_cuda<input_t, weight_t>(params, stream);
+            } else {
+                causal_conv1d_channellast_bwd_cuda<input_t, weight_t>(params, stream);
+            }
+        });
+    });
     return {dx, dweight.to(weight.dtype()), bias_.has_value() ? dbias.to(bias_.value().dtype()) : dbias, dinitial_states};
 }
 
@@ -443,6 +443,6 @@ causal_conv1d_update(const at::Tensor &x,
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("causal_conv1d_fwd", &causal_conv1d_fwd, "Causal conv1d forward");
-    // m.def("causal_conv1d_bwd", &causal_conv1d_bwd, "Causal conv1d backward");
+    m.def("causal_conv1d_bwd", &causal_conv1d_bwd, "Causal conv1d backward");
     m.def("causal_conv1d_update", &causal_conv1d_update, "Causal conv1d update");
 }

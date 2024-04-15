@@ -188,7 +188,7 @@ if not SKIP_CUDA_BUILD:
             sources=[
                 "csrc/causal_conv1d.cpp",
                 "csrc/causal_conv1d_fwd.cu",
-                # "csrc/causal_conv1d_bwd.cu",
+                "csrc/causal_conv1d_bwd.cu",
                 "csrc/causal_conv1d_update.cu",
             ],
             extra_compile_args=extra_compile_args,
