@@ -6,9 +6,13 @@
 #include <c10/util/Half.h>
 #include <c10/cuda/CUDAException.h>  // For C10_CUDA_CHECK and C10_CUDA_KERNEL_LAUNCH_CHECK
 
-#include <hipcub/hipcub.hpp>
-// #include <cub/block/block_load.cuh>
-// #include <cub/block/block_store.cuh>
+#ifndef USE_ROCM
+    #include <cub/block/block_load.cuh>
+    #include <cub/block/block_store.cuh>
+#else
+    #include <hipcub/hipcub.hpp>
+    namespace cub = hipcub;
+#endif
 
 #include "causal_conv1d.h"
 #include "causal_conv1d_common.h"

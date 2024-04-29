@@ -44,7 +44,6 @@ void causal_conv1d_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
 template <typename input_t, typename weight_t>
 void causal_conv1d_channellast_fwd_cuda(ConvParamsBase &params, cudaStream_t stream);
 
-// TODO: for minimal
 template<typename input_t, typename weight_t>
 void causal_conv1d_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream);
 template<typename input_t, typename weight_t>

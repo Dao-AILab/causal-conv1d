@@ -10,6 +10,19 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// rocm functions
+#include <algorithm>
+constexpr size_t my_max(std::initializer_list<size_t> ilist)
+{
+    return *std::max_element(ilist.begin(), ilist.end());
+}
+
+// added adeem
+template<typename T>
+constexpr T constexpr_min(T a, T b) {
+    return a < b ? a : b;
+}
+
 template<int BYTES> struct BytesToType {};
 
 template<> struct BytesToType<16> {

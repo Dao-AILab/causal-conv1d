@@ -6,33 +6,18 @@
 #include <c10/util/Half.h>
 #include <c10/cuda/CUDAException.h>  // For C10_CUDA_CHECK and C10_CUDA_KERNEL_LAUNCH_CHECK
 
-#include <hipcub/hipcub.hpp>
-// #include <cub/block/block_load.cuh>
-// #include <cub/block/block_store.cuh>
-// #include <cub/block/block_reduce.cuh>
+#ifndef USE_ROCM
+    #include <cub/block/block_load.cuh>
+    #include <cub/block/block_store.cuh>
+    #include <cub/block/block_reduce.cuh>
+#else
+    #include <hipcub/hipcub.hpp>
+    namespace cub = hipcub;
+#endif
 
 #include "causal_conv1d.h"
 #include "causal_conv1d_common.h"
 #include "static_switch.h"
-
-#include <algorithm>
-
-
-// TODO (two lines below): remove, here for debugging only
-#include <stdio.h>
-#include <typeinfo>
-
-
-constexpr size_t my_max(std::initializer_list<size_t> ilist)
-{
-    return *std::max_element(ilist.begin(), ilist.end());
-}
-
-// added adeem
-template<typename T>
-constexpr T constexpr_min(T a, T b) {
-    return a < b ? a : b;
-}
 
 template<int kNThreads_, int kWidth_, bool kSiluAct_, bool kIsVecLoad_, typename input_t_, typename weight_t_>
 struct Causal_conv1d_bwd_kernel_traits {
@@ -50,11 +35,11 @@ struct Causal_conv1d_bwd_kernel_traits {
     static constexpr int kNExchangeRounds = sizeof(float) / sizeof(input_t);
     static constexpr bool kIsVecLoad = kIsVecLoad_;
     using vec_t = typename BytesToType<kNBytes * kNElts>::Type;
-    using BlockLoadT = hipcub::BlockLoad<input_t, kNThreads, kNElts, hipcub::BLOCK_LOAD_WARP_TRANSPOSE>;
-    using BlockLoadVecT = hipcub::BlockLoad<vec_t, kNThreads, 1, hipcub::BLOCK_LOAD_DIRECT>;
-    using BlockStoreT = hipcub::BlockStore<input_t, kNThreads, kNElts, hipcub::BLOCK_STORE_WARP_TRANSPOSE>;
-    using BlockStoreVecT = hipcub::BlockStore<vec_t, kNThreads, 1, hipcub::BLOCK_STORE_DIRECT>;
-    using BlockReduceFloatT = hipcub::BlockReduce<float, kNThreads>;
+    using BlockLoadT = cub::BlockLoad<input_t, kNThreads, kNElts, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
+    using BlockLoadVecT = cub::BlockLoad<vec_t, kNThreads, 1, cub::BLOCK_LOAD_DIRECT>;
+    using BlockStoreT = cub::BlockStore<input_t, kNThreads, kNElts, cub::BLOCK_STORE_WARP_TRANSPOSE>;
+    using BlockStoreVecT = cub::BlockStore<vec_t, kNThreads, 1, cub::BLOCK_STORE_DIRECT>;
+    using BlockReduceFloatT = cub::BlockReduce<float, kNThreads>;
     static constexpr int kSmemIOSize = kIsVecLoad
         ? 0
         : my_max({sizeof(typename BlockLoadT::TempStorage), sizeof(typename BlockStoreT::TempStorage)});
@@ -333,8 +318,8 @@ struct Causal_conv1d_channellast_bwd_kernel_traits {
     static_assert(kNLoads * kNColsPerLoad == kChunkSizeL);
     static constexpr bool kIsVecLoad = kIsVecLoad_;
     using vec_t = typename BytesToType<kNBytes * kNElts>::Type;
-    // using BlockLoadT = hipcub::BlockLoad<input_t, kNThreads, kNItems, hipcub::BLOCK_LOAD_WARP_TRANSPOSE>;
-    // using BlockStoreT = hipcub::BlockStore<input_t, kNThreads, kNItems, hipcub::BLOCK_STORE_WARP_TRANSPOSE>;
+    // using BlockLoadT = cub::BlockLoad<input_t, kNThreads, kNItems, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
+    // using BlockStoreT = cub::BlockStore<input_t, kNThreads, kNItems, cub::BLOCK_STORE_WARP_TRANSPOSE>;
     // static constexpr int kSmemSize = std::max({sizeof(typename BlockLoadT::TempStorage),
     //                                            sizeof(typename BlockStoreT::TempStorage)});
     // static constexpr int kSmemSize = kChunkSizeL * kNEltsPerRow * kNBytes;
