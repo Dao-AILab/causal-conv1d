@@ -42,9 +42,9 @@ struct Causal_conv1d_bwd_kernel_traits {
     using BlockReduceFloatT = cub::BlockReduce<float, kNThreads>;
     static constexpr int kSmemIOSize = kIsVecLoad
         ? 0
-        : my_max({sizeof(typename BlockLoadT::TempStorage), sizeof(typename BlockStoreT::TempStorage)});
+        : custom_max({sizeof(typename BlockLoadT::TempStorage), sizeof(typename BlockStoreT::TempStorage)});
     static constexpr int kSmemExchangeSize = kNThreads * kNBytes * kNElts * (!kSiluAct ? 1 : kNExchangeRounds + 1);
-    static constexpr int kSmemSize = my_max({kSmemExchangeSize,
+    static constexpr int kSmemSize = custom_max({kSmemExchangeSize,
             int(sizeof(typename BlockReduceFloatT::TempStorage))}) + (kIsVecLoad ? 0 : kSmemIOSize);
 };
 

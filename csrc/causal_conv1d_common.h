@@ -4,24 +4,44 @@
 
 #pragma once
 
-//#include <cuda_bf16.h>
-#include <hip/hip_bf16.h>
+#ifndef USE_ROCM
+    #include <cuda_bf16.h>
+
+    template<typename T>
+    __device__ inline T shuffle_xor(T val, int offset) {
+        return __shfl_xor_sync(uint32_t(-1), val, offset);
+    }
+
+    constexpr size_t custom_max(std::initializer_list<size_t> ilist) 
+    {
+        return std::max(ilist);
+    }
+
+    template<typename T>
+    constexpr T constexpr_min(T a, T b) {
+        return std::min(a, b);
+    }
+
+#else
+    #include <hip/hip_bf16.h>
+
+    template<typename T>
+    __device__ inline T shuffle_xor(T val, int offset) {
+        return __shfl_xor(val, offset);
+    }
+    constexpr size_t custom_max(std::initializer_list<size_t> ilist) 
+    {
+        return *std::max_element(ilist.begin(), ilist.end());
+    }
+
+    template<typename T>
+    constexpr T constexpr_min(T a, T b) {
+        return a < b ? a : b;
+    }
+#endif
 #include <cuda_fp16.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-// rocm functions
-#include <algorithm>
-constexpr size_t my_max(std::initializer_list<size_t> ilist)
-{
-    return *std::max_element(ilist.begin(), ilist.end());
-}
-
-// added adeem
-template<typename T>
-constexpr T constexpr_min(T a, T b) {
-    return a < b ? a : b;
-}
 
 template<int BYTES> struct BytesToType {};
 
@@ -63,9 +83,7 @@ struct Allreduce {
     template<typename T, typename Operator>
     static __device__ inline T run(T x, Operator &op) {
         constexpr int OFFSET = THREADS / 2;
-        // TODO: document this
-        // x = op(x, __shfl_xor_sync(uint32_t(-1), x, OFFSET));
-        x = op(x, __shfl_xor(x, OFFSET)); // 
+        x = op(x, shuffle_xor(x, OFFSET));
         return Allreduce<OFFSET>::run(x, op);
     }
 };
@@ -74,9 +92,7 @@ template<>
 struct Allreduce<2> {
 template<typename T, typename Operator>
 static __device__ inline T run(T x, Operator &op) {
-    // TODO: document this
-    // x = op(x, __shfl_xor_sync(uint32_t(-1), x, 1));
-    x = op(x, __shfl_xor(x, 1)); // 
+    x = op(x, shuffle_xor(x, 1));
     return x;
 }
 };
