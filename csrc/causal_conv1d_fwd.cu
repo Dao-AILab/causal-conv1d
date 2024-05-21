@@ -141,30 +141,22 @@ void causal_conv1d_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
         using Ktraits = Causal_conv1d_fwd_kernel_traits<kNThreads, kWidth, kIsVecLoad, input_t, weight_t>;
         constexpr int kSmemSize = Ktraits::kSmemSize;
         dim3 grid(params.batch, params.dim);
-        // auto kernel = &causal_conv1d_fwd_kernel<Ktraits>;
 
-        // Had to change this substantially since potentially the hip 
-        // interface for setting kernel launch attributes is slightly different from 
-        // cuda's. In particualar, it seems to expect a plain const void * pointer.
-
-
-        // // TODO: this does not properly allocate shared memory, fix.
-        const void * kernel = (void*) &causal_conv1d_fwd_kernel<Ktraits>; // TODO: change to reinterpret cast.
+        auto kernel = &causal_conv1d_fwd_kernel<Ktraits>;
 
         if (kSmemSize >= 48 * 1024) {
+            #ifndef USE_ROCM
             C10_CUDA_CHECK(cudaFuncSetAttribute(
                 kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            }
-        
-        auto kernel_fn = (void (*const)(ConvParamsBase)) kernel; // Todo - double-check. Had to add this C-style conversion. // TODO: change to reinterpret cast?
+            #else
+            // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
+            C10_CUDA_CHECK(cudaFuncSetAttribute(
+                (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+            std::cerr << "Warning (causal_conv1d_fwd_launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
+            #endif
+        }
+        kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
 
-        // TODO: remove and replace with the above
-        // auto kernel_fn = &selective_scan_fwd_kernel<Ktraits>;
-        
-        
-        kernel_fn<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-
-        // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
 }
