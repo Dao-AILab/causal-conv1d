@@ -1,4 +1,4 @@
-### Patching ROCm before anu installation steps (only for ROCm 6.0, not required for ROCm >= 6.1)
+### Patching ROCm before any installation steps (only for ROCm 6.0, not required for ROCm >= 6.1)
 
 1. Locate your ROCm installation directory. This is typically found at `/opt/rocm/`, but may vary depending on your installation.
 
