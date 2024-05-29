@@ -1,19 +1,10 @@
-## Prerequisites
+### Patching ROCm before anu installation steps (only for ROCm 6.0, not required for ROCm >= 6.1)
 
-Before installing the causal depthwise conv1d module, you need to patch your ROCm installation due to a known issue with some functions not being declared as `inline`. This step is required to avoid multiple definition errors during compilation.
+1. Locate your ROCm installation directory. This is typically found at `/opt/rocm/`, but may vary depending on your installation.
 
-### Patching ROCm
-
-1. Locate your ROCm installation directory. This is typically found at `/opt/rocm/`, but the location may vary depending on your installation.
-
-2. Backup the original ROCm header file:
+2. Apply the Patch. Run with `sudo` in case you encounter permission issues.
    ```bash
-    sudo cp /opt/rocm/include/hip/amd_detail/amd_hip_bf16.h /opt/rocm/include/hip/amd_detail/amd_hip_bf16.h.backup
-   ```
-
-3. Copy the patched header file from this repository to your ROCm include directory:
-   ```bash
-    sudo cp rocm_update_files/amd_hip_bf16.h /opt/rocm/include/hip/amd_detail/amd_hip_bf16.h
+    patch /opt/rocm/include/hip/amd_detail/amd_hip_bf16.h < rocm_patch/rocm6_0.patch 
    ```
 
 # Causal depthwise conv1d in CUDA with a PyTorch interface
