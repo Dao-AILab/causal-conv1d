@@ -6,11 +6,11 @@ Features:
 
 ## How to use
 
-```
+```python
 from causal_conv1d import causal_conv1d_fn
 ```
 
-```
+```python
 def causal_conv1d_fn(x, weight, bias=None, activation=None):
     """
     x: (batch, dim, seqlen)
@@ -23,7 +23,7 @@ def causal_conv1d_fn(x, weight, bias=None, activation=None):
 ```
 
 Equivalent to:
-```
+```python
 import torch.nn.functional as F
 
 F.conv1d(x, weight.unsqueeze(1), bias, padding=width - 1, groups=dim)[..., :seqlen]
