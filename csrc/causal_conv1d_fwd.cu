@@ -152,7 +152,7 @@ void causal_conv1d_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
             // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
             C10_CUDA_CHECK(cudaFuncSetAttribute(
                 (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            std::cerr << "Warning (causal_conv1d_fwd_launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
+            std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
             #endif
         }
         kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
