@@ -67,7 +67,7 @@ def get_cuda_bare_metal_version(cuda_dir):
 
 
 def get_hip_version(rocm_dir):
-    ## TODO: largely from xformers, proper attribution.
+
     hipcc_bin = "hipcc" if rocm_dir is None else os.path.join(rocm_dir, "bin", "hipcc")
     try:
         raw_output = subprocess.check_output(
@@ -132,10 +132,10 @@ if not torch.cuda.is_available():
 HIP_BUILD = bool(torch.version.hip)
 
 if not SKIP_CUDA_BUILD:
-    if not torch.version.hip: ## TODO add to build wheel
-        print("\n\ntorch.__version__  = {}\n\n".format(torch.__version__))
-        TORCH_MAJOR = int(torch.__version__.split(".")[0])
-        TORCH_MINOR = int(torch.__version__.split(".")[1])
+
+    print("\n\ntorch.__version__  = {}\n\n".format(torch.__version__))
+    TORCH_MAJOR = int(torch.__version__.split(".")[0])
+    TORCH_MINOR = int(torch.__version__.split(".")[1])
 
 
     cc_flag = []
@@ -146,11 +146,18 @@ if not SKIP_CUDA_BUILD:
         rocm_home = os.getenv("ROCM_PATH")
         _, hip_version = get_hip_version(rocm_home)
 
+        
         if HIP_HOME is not None:
-            if hip_version < Version("6.0"): #TODO: rocm file patch warning/reminder if under 6.1?
+            if hip_version < Version("6.0"):
                 raise RuntimeError(
                     f"{PACKAGE_NAME} is only supported on ROCm 6.0 and above.  "
                     "Note: make sure HIP has a supported version by running hipcc --version."
+                )
+            if hip_version == Version("6.0"):
+                warnings.warn(
+                    f"{PACKAGE_NAME} requires a patch to be applied when running on ROCm 6.0. "
+                    "Refer to the README.md for detailed instructions.",
+                    UserWarning
                 )
 
         cc_flag.append("-DBUILD_PYTHON_PACKAGE")
@@ -191,7 +198,6 @@ if not SKIP_CUDA_BUILD:
 
 
     if HIP_BUILD:
-        ###FROM XFORMER: # TODO: attribution?
         extra_compile_args = {
             "cxx": ["-O3", "-std=c++17"],
             "nvcc": [
