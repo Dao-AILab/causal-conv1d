@@ -1,0 +1,29 @@
+[project]
+name = "causal_conv1d"
+readme = "README.md"
+dynamic = ["version"]
+authors = [
+    { name = "Tri Dao", email = "tri@tridao.me" },
+]
+requires-python = ">= 3.7"
+license = { file = "LICENSE" }  # Include a LICENSE file in your repo
+dependencies = [
+    "torch",
+    "einops",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
+
+[build-system]
+requires = [
+    "setuptools>=61.0.0",
+    "wheel",
+    "torch",
+    "packaging",
+    "ninja",
+]
+build-backend = "setuptools.build_meta"
