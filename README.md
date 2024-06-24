@@ -4,6 +4,12 @@ Features:
 - Support fp32, fp16, bf16.
 - Kernel size 2, 3, 4.
 
+## Installation
+
+```bash
+pip install causal-conv1d
+```
+
 ## How to use
 
 ```
