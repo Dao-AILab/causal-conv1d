@@ -387,7 +387,7 @@ causal_conv1d_update(const at::Tensor &x,
                      const at::Tensor &weight,
                      const c10::optional<at::Tensor> &bias_,
                      bool silu_activation,
-                     const c10::optional<at::Tensor> &advance_lengths_
+                     const c10::optional<at::Tensor> &cache_seqlens_
                      ) {
     auto input_type = x.scalar_type();
     auto weight_type = weight.scalar_type();
@@ -434,15 +434,15 @@ causal_conv1d_update(const at::Tensor &x,
     params.conv_state_c_stride = conv_state.stride(1);
     params.conv_state_l_stride = conv_state.stride(2);
 
-    if (advance_lengths_.has_value()) {
-        auto advance_lengths = advance_lengths_.value();
-        TORCH_CHECK(advance_lengths.scalar_type() == torch::kInt32);
-        TORCH_CHECK(advance_lengths.is_cuda());
-        TORCH_CHECK(advance_lengths.stride(-1) == 1);
-        CHECK_SHAPE(advance_lengths, batch_size);
-        params.advance_lengths = advance_lengths.data_ptr<int32_t>();
+    if (cache_seqlens_.has_value()) {
+        auto cache_seqlens = cache_seqlens_.value();
+        TORCH_CHECK(cache_seqlens.scalar_type() == torch::kInt32);
+        TORCH_CHECK(cache_seqlens.is_cuda());
+        TORCH_CHECK(cache_seqlens.stride(-1) == 1);
+        CHECK_SHAPE(cache_seqlens, batch_size);
+        params.cache_seqlens = cache_seqlens.data_ptr<int32_t>();
     } else {
-        params.advance_lengths = nullptr;
+        params.cache_seqlens = nullptr;
     }
 
     // Otherwise the kernel will be launched from cuda:0 device

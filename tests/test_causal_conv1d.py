@@ -109,15 +109,15 @@ def test_causal_conv1d(dim, seqlen, width, has_bias, silu_activation, itype, cha
 # @pytest.mark.parametrize('silu_activation', [True])
 @pytest.mark.parametrize("has_bias", [False, True])
 # @pytest.mark.parametrize('has_bias', [True])
-@pytest.mark.parametrize("has_advance_lengths", [False, True])
-# @pytest.mark.parametrize('has_advance_lengths', [True])
+@pytest.mark.parametrize("has_cache_seqlens", [False, True])
+# @pytest.mark.parametrize('has_cache_seqlens', [True])
 @pytest.mark.parametrize("seqlen", [1, 4, 5])
 # @pytest.mark.parametrize('seqlen', [4])
 @pytest.mark.parametrize("width", [2, 3, 4])
 # @pytest.mark.parametrize('width', [4])
 @pytest.mark.parametrize("dim", [2048, 2048 + 16, 4096])
 # @pytest.mark.parametrize("dim", [2048])
-def test_causal_conv1d_update(dim, width, seqlen, has_advance_lengths, has_bias, silu_activation, itype):
+def test_causal_conv1d_update(dim, width, seqlen, has_cache_seqlens, has_bias, silu_activation, itype):
     device = "cuda"
     rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (3e-3, 5e-3)
     if itype == torch.bfloat16:
@@ -138,10 +138,10 @@ def test_causal_conv1d_update(dim, width, seqlen, has_advance_lengths, has_bias,
         bias = None
     conv_state_ref = conv_state.detach().clone()
     activation = None if not silu_activation else "silu"
-    advance_lengths = (torch.randint(0, seqlen + 1, (batch,), dtype=torch.int32, device=device)
-                       if has_advance_lengths else None)
-    out = causal_conv1d_update(x, conv_state, weight, bias, activation=activation, advance_lengths=advance_lengths)
-    out_ref = causal_conv1d_update_ref(x, conv_state_ref, weight, bias, activation=activation, advance_lengths=advance_lengths)
+    cache_seqlens = (torch.randint(0, 1024, (batch,), dtype=torch.int32, device=device)
+                     if has_cache_seqlens else None)
+    out = causal_conv1d_update(x, conv_state, weight, bias, activation=activation, cache_seqlens=cache_seqlens)
+    out_ref = causal_conv1d_update_ref(x, conv_state_ref, weight, bias, activation=activation, cache_seqlens=cache_seqlens)
 
     print(f"Output max diff: {(out - out_ref).abs().max().item()}")
     print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
