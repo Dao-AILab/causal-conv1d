@@ -386,7 +386,9 @@ causal_conv1d_update(const at::Tensor &x,
                      const at::Tensor &conv_state,
                      const at::Tensor &weight,
                      const c10::optional<at::Tensor> &bias_,
-                     bool silu_activation) {
+                     bool silu_activation,
+                     const c10::optional<at::Tensor> &advance_lengths_
+                     ) {
     auto input_type = x.scalar_type();
     auto weight_type = weight.scalar_type();
     TORCH_CHECK(input_type == at::ScalarType::Float || input_type == at::ScalarType::Half || input_type == at::ScalarType::BFloat16);
@@ -400,10 +402,13 @@ causal_conv1d_update(const at::Tensor &x,
     const auto sizes = x.sizes();
     const int batch_size = sizes[0];
     const int dim = sizes[1];
+    const int seqlen = sizes[2];
     const int width = weight.size(-1);
+    const int conv_state_len = conv_state.size(2);
+    TORCH_CHECK(conv_state_len >= width - 1);
 
-    CHECK_SHAPE(x, batch_size, dim);
-    CHECK_SHAPE(conv_state, batch_size, dim, width);
+    CHECK_SHAPE(x, batch_size, dim, seqlen);
+    CHECK_SHAPE(conv_state, batch_size, dim, conv_state_len);
     CHECK_SHAPE(weight, dim, width);
 
     TORCH_CHECK(width >= 2 && width <= 4, "causal_conv1d only supports width between 2 and 4");
@@ -419,14 +424,26 @@ causal_conv1d_update(const at::Tensor &x,
     at::Tensor out = torch::empty_like(x);
 
     ConvParamsBase params;
-    set_conv_params_fwd(params, batch_size, dim, /*seqlen=*/1, width, x, weight, out,
+    set_conv_params_fwd(params, batch_size, dim, seqlen, width, x, weight, out,
                         bias_.has_value() ? bias_.value().data_ptr() : nullptr,
                         silu_activation);
     params.conv_state_ptr = conv_state.data_ptr();
+    params.conv_state_len = conv_state_len;
     // All stride are in elements, not bytes.
     params.conv_state_batch_stride = conv_state.stride(0);
     params.conv_state_c_stride = conv_state.stride(1);
     params.conv_state_l_stride = conv_state.stride(2);
+
+    if (advance_lengths_.has_value()) {
+        auto advance_lengths = advance_lengths_.value();
+        TORCH_CHECK(advance_lengths.scalar_type() == torch::kInt32);
+        TORCH_CHECK(advance_lengths.is_cuda());
+        TORCH_CHECK(advance_lengths.stride(-1) == 1);
+        CHECK_SHAPE(advance_lengths, batch_size);
+        params.advance_lengths = advance_lengths.data_ptr<int32_t>();
+    } else {
+        params.advance_lengths = nullptr;
+    }
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing

@@ -172,42 +172,64 @@ def causal_conv1d_ref(
     return out if not return_final_states else (out, final_states_out)
 
 
-def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None):
+def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, advance_lengths=None):
     """
-    x: (batch, dim)
-    conv_state: (batch, dim, width)
+    x: (batch, dim) or (batch, dim, seqlen)
+    conv_state: (batch, dim, state_len), where state_len >= width - 1
     weight: (dim, width)
     bias: (dim,)
+    advance_lengths: (batch,), dtype int32. Each must be in [0, seqlen]. Values outside this range
+        will be clipped. If None, advance_lengths will be set to seqlen.
+        The conv_state will be updated by copying @advance_lengths elements from x to the end of conv_state,
+        and shifting the rest of the elements to the left.
 
-    out: (batch, dim)
+    out: (batch, dim) or (batch, dim, seqlen)
     """
     if activation not in [None, "silu", "swish"]:
         raise NotImplementedError("activation must be None, silu, or swish")
     activation = activation in ["silu", "swish"]
-    return causal_conv1d_cuda.causal_conv1d_update(
-        x, conv_state, weight, bias, activation
+    unsqueeze = x.dim() == 2
+    if unsqueeze:
+        x = x.unsqueeze(-1)
+    out = causal_conv1d_cuda.causal_conv1d_update(
+        x, conv_state, weight, bias, activation, advance_lengths
     )
+    if unsqueeze:
+        out = out.squeeze(-1)
+    return out
 
 
-def causal_conv1d_update_ref(x, conv_state, weight, bias=None, activation=None):
+def causal_conv1d_update_ref(x, conv_state, weight, bias=None, activation=None, advance_lengths=None):
     """
-    x: (batch, dim)
-    conv_state: (batch, dim, width)
+    x: (batch, dim) or (batch, dim, seqlen)
+    conv_state: (batch, dim, state_len), where state_len >= width - 1
     weight: (dim, width)
     bias: (dim,)
+    advance_lengths: (batch,), dtype int32. Each must be in [0, seqlen]. Values outside this range
+        will be clipped. If None, advance_lengths will be set to seqlen.
+        The conv_state will be updated by copying @advance_lengths elements from x to the end of conv_state,
+        and shifting the rest of the elements to the left.
 
-    out: (batch, dim)
+    out: (batch, dim) or (batch, dim, seqlen)
     """
     if activation not in [None, "silu", "swish"]:
         raise NotImplementedError("activation must be None, silu, or swish")
     dtype_in = x.dtype
-    batch, dim = x.shape
+    unsqueeze = x.dim() == 2
+    if unsqueeze:
+        x = x.unsqueeze(-1)
+    batch, dim, seqlen = x.shape
     width = weight.shape[1]
-    assert conv_state.shape == (batch, dim, width)
+    state_len = conv_state.shape[-1]
+    assert conv_state.shape == (batch, dim, state_len)
     assert weight.shape == (dim, width)
-    conv_state.copy_(torch.roll(conv_state, shifts=-1, dims=-1))  # Update state (B D W)
-    conv_state[:, :, -1] = x
-    out = torch.sum(conv_state * weight, dim=-1)  # (B D)
-    if bias is not None:
-        out += bias
+    x_new = torch.cat([conv_state, x], dim=-1).to(weight.dtype)  # (batch, dim, state_len + seqlen)
+    out = F.conv1d(x_new, weight.unsqueeze(1), bias, padding=0, groups=dim)[:, :, -seqlen:]
+    if advance_lengths is None:
+        advance_lengths = torch.full((batch,), seqlen, dtype=torch.long, device=x.device)
+    idx = torch.arange(state_len, dtype=torch.long, device=x.device).unsqueeze(0) + advance_lengths.unsqueeze(1)
+    idx = idx.unsqueeze(1).expand(-1, dim, -1)
+    conv_state.copy_(x_new.gather(2, idx))
+    if unsqueeze:
+        out = out.squeeze(-1)
     return (out if activation is None else F.silu(out)).to(dtype=dtype_in)
