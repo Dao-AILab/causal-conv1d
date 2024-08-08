@@ -172,7 +172,7 @@ def causal_conv1d_ref(
     return out if not return_final_states else (out, final_states_out)
 
 
-def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, cache_seqlens=None):
+def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, cache_seqlens=None, conv_state_indices=None):
     """
     x: (batch, dim) or (batch, dim, seqlen)
     conv_state: (batch, dim, state_len), where state_len >= width - 1
@@ -182,6 +182,10 @@ def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, cach
         If not None, the conv_state is treated as a circular buffer.
         The conv_state will be updated by copying x to the conv_state starting at the index
         @cache_seqlens % state_len.
+    conv_state_indices: (batch,), dtype int32
+        If None, the conv_state is a larger tensor along the batch dim, 
+        and we are selecting the batch coords specified by conv_state_indices.
+        Useful for a continuous batching scenario.
 
     out: (batch, dim) or (batch, dim, seqlen)
     """
@@ -192,7 +196,7 @@ def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, cach
     if unsqueeze:
         x = x.unsqueeze(-1)
     out = causal_conv1d_cuda.causal_conv1d_update(
-        x, conv_state, weight, bias, activation, cache_seqlens
+        x, conv_state, weight, bias, activation, cache_seqlens, conv_state_indices
     )
     if unsqueeze:
         out = out.squeeze(-1)

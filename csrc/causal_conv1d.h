@@ -35,6 +35,10 @@ struct ConvParamsBase {
     void *__restrict__ conv_state_ptr;
     int32_t *__restrict__ cache_seqlens;
 
+    // Only used if the elements of the batch are gathered from a larger buffer,
+    // which may happen for continuous batching.
+    int32_t *__restrict__ conv_state_indices_ptr;
+
     void *__restrict__ seq_idx_ptr;
 
     // No __restrict__ since initial_states could be the same as final_states.

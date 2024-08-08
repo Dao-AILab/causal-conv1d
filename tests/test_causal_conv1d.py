@@ -149,6 +149,56 @@ def test_causal_conv1d_update(dim, width, seqlen, has_cache_seqlens, has_bias, s
     assert torch.equal(conv_state, conv_state_ref)
     assert torch.allclose(out, out_ref, rtol=rtol, atol=atol)
 
+@pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
+# @pytest.mark.parametrize('itype', [torch.float16])
+@pytest.mark.parametrize("silu_activation", [False, True])
+# @pytest.mark.parametrize('silu_activation', [True])
+@pytest.mark.parametrize("has_bias", [False, True])
+# @pytest.mark.parametrize('has_bias', [True])
+@pytest.mark.parametrize("has_cache_seqlens", [False, True])
+# @pytest.mark.parametrize('has_cache_seqlens', [True])
+@pytest.mark.parametrize("seqlen", [1, 4, 5])
+# @pytest.mark.parametrize('seqlen', [4])
+@pytest.mark.parametrize("width", [2, 3, 4])
+# @pytest.mark.parametrize('width', [4])
+@pytest.mark.parametrize("dim", [2048, 2048 + 16, 4096])
+# @pytest.mark.parametrize("dim", [2048])
+def test_causal_conv1d_update_with_batch_gather(dim, width, seqlen, has_cache_seqlens, has_bias, silu_activation, itype):
+    device = "cuda"
+    rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (3e-3, 5e-3)
+    if itype == torch.bfloat16:
+        rtol, atol = 1e-2, 5e-2
+    rtolw, atolw = (1e-3, 1e-3)
+    # set seed
+    torch.random.manual_seed(0)
+    batch = 64
+    # batch = 1
+    # dim = 64
+    x = torch.randn(batch, seqlen, dim, device=device, dtype=itype).transpose(-1, -2)
+    state_len = torch.randint(width - 1, width + 10, (1,)).item()
+
+    total_entries = 10 * batch
+    conv_state = torch.randn(total_entries, state_len, dim, device=device, dtype=itype).transpose(-1, -2)
+    conv_state_indices = torch.randperm(total_entries)[:batch].to(dtype=torch.int32, device=device)
+
+    weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
+    if has_bias:
+        bias = torch.randn(dim, device=device, dtype=torch.float32, requires_grad=True)
+    else:
+        bias = None
+    conv_state_ref = conv_state[conv_state_indices, :].detach().clone()
+    activation = None if not silu_activation else "silu"
+    cache_seqlens = (torch.randint(0, 1024, (batch,), dtype=torch.int32, device=device)
+                     if has_cache_seqlens else None)
+    out = causal_conv1d_update(x, conv_state, weight, bias, activation=activation,
+                               cache_seqlens=cache_seqlens, conv_state_indices=conv_state_indices)
+    out_ref = causal_conv1d_update_ref(x, conv_state_ref, weight, bias, activation=activation, cache_seqlens=cache_seqlens)
+
+    print(f"Output max diff: {(out - out_ref).abs().max().item()}")
+    print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
+    assert torch.equal(conv_state[conv_state_indices, :], conv_state_ref)
+    assert torch.allclose(out, out_ref, rtol=rtol, atol=atol)
+
 
 @pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
 # @pytest.mark.parametrize('itype', [torch.float16])
