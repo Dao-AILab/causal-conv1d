@@ -38,8 +38,8 @@ void causal_conv1d_update_kernel(ConvParamsBase params) {
 
     // If params.conv_state_batch_indices is set, then the conv state is gathered from the conv state tensor
     // along the batch axis. Otherwise, the conv state coordinate is the same as the batch id.
-    const int conv_state_batch_coord = params.conv_state_indices_ptr == nullptr 
-        ? batch_id 
+    const int conv_state_batch_coord = params.conv_state_indices_ptr == nullptr
+        ? batch_id
         : params.conv_state_indices_ptr[batch_id];
     input_t *conv_state = reinterpret_cast<input_t *>(params.conv_state_ptr) 
         + conv_state_batch_coord * params.conv_state_batch_stride
