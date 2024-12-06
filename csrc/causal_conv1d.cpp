@@ -387,7 +387,8 @@ causal_conv1d_update(const at::Tensor &x,
                      const at::Tensor &weight,
                      const c10::optional<at::Tensor> &bias_,
                      bool silu_activation,
-                     const c10::optional<at::Tensor> &cache_seqlens_
+                     const c10::optional<at::Tensor> &cache_seqlens_,
+                     const c10::optional<at::Tensor> &conv_state_indices_
                      ) {
     auto input_type = x.scalar_type();
     auto weight_type = weight.scalar_type();
@@ -408,7 +409,6 @@ causal_conv1d_update(const at::Tensor &x,
     TORCH_CHECK(conv_state_len >= width - 1);
 
     CHECK_SHAPE(x, batch_size, dim, seqlen);
-    CHECK_SHAPE(conv_state, batch_size, dim, conv_state_len);
     CHECK_SHAPE(weight, dim, width);
 
     TORCH_CHECK(width >= 2 && width <= 4, "causal_conv1d only supports width between 2 and 4");
@@ -433,6 +433,22 @@ causal_conv1d_update(const at::Tensor &x,
     params.conv_state_batch_stride = conv_state.stride(0);
     params.conv_state_c_stride = conv_state.stride(1);
     params.conv_state_l_stride = conv_state.stride(2);
+
+    if (conv_state_indices_.has_value()) {
+        auto conv_state_indices = conv_state_indices_.value();
+        TORCH_CHECK(conv_state_indices.scalar_type() == torch::kInt32)
+        TORCH_CHECK(conv_state_indices.is_cuda());
+        TORCH_CHECK(conv_state_indices.stride(0) == 1)
+        CHECK_SHAPE(conv_state_indices, batch_size);
+
+        int conv_state_entries = conv_state.size(0);
+        CHECK_SHAPE(conv_state, conv_state_entries, dim, conv_state_len);
+
+        params.conv_state_indices_ptr = conv_state_indices.data_ptr<int32_t>();
+    } else {
+        CHECK_SHAPE(conv_state, batch_size, dim, conv_state_len);
+        params.conv_state_indices_ptr = nullptr;
+    }
 
     if (cache_seqlens_.has_value()) {
         auto cache_seqlens = cache_seqlens_.value();
