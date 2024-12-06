@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 
 
-import causal_conv1d_cuda
+import causal_conv1d.causal_conv1d_cuda as causal_conv1d_cuda
 
 
 class CausalConv1dFn(torch.autograd.Function):
