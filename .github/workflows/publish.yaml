@@ -109,6 +109,7 @@ jobs:
           # We need the cuda libraries (e.g. cuSparse, cuSolver) for compiling PyTorch extensions,
           # not just nvcc
           sub-packages: '["nvcc"]'
+          non-cuda-sub-packages: '["libcublas", "libcusparse"]'
 
       - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
         run: |
