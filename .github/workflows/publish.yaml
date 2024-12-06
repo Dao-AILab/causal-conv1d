@@ -113,11 +113,11 @@ jobs:
       - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
         run: |
           pip install --upgrade pip
-          # If we don't install before installing Pytorch, we get error for torch 2.0.1
-          # ERROR: Could not find a version that satisfies the requirement setuptools>=40.8.0 (from versions: none)
-          pip install lit
           # For some reason torch 2.2.0 on python 3.12 errors saying no setuptools
           pip install setuptools==68.0.0
+          # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
+          # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
+          pip install typing-extensions=4.12.2
           # We want to figure out the CUDA version to download pytorch
           # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
           # This code is ugly, maybe there's a better way to do this.
