@@ -108,7 +108,7 @@ jobs:
           method: 'network'
           # We need the cuda libraries (e.g. cuSparse, cuSolver) for compiling PyTorch extensions,
           # not just nvcc
-          # sub-packages: '["nvcc"]'
+          sub-packages: '["nvcc"]'
 
       - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
         run: |
@@ -117,7 +117,7 @@ jobs:
           pip install setuptools==68.0.0
           # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
           # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
-          pip install typing-extensions=4.12.2
+          pip install typing-extensions==4.12.2
           # We want to figure out the CUDA version to download pytorch
           # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
           # This code is ugly, maybe there's a better way to do this.
