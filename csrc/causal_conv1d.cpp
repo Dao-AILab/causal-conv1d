@@ -2,8 +2,8 @@
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/python.h>
 #include <vector>
 
@@ -221,8 +221,7 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
     }
 
     // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)x.get_device()};
+    at::cuda::CUDAGuard device_guard{x.device()};
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_fwd", [&] {
         DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_fwd", [&] {
@@ -308,8 +307,7 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
     }
 
     // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)x.get_device()};
+    at::cuda::CUDAGuard device_guard{x.device()};
 
     at::Tensor dweight = torch::zeros_like(weight, weight.options().dtype(at::kFloat));
     at::Tensor dbias;
@@ -462,8 +460,7 @@ causal_conv1d_update(const at::Tensor &x,
     }
 
     // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)x.get_device()};
+    at::cuda::CUDAGuard device_guard{x.device()};
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_update", [&] {
         DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_update", [&] {
