@@ -125,11 +125,6 @@ if not SKIP_CUDA_BUILD:
 
     cc_flag = []
 
-    # if sys.platform == "win32":
-    #     cxx_opt = ["/O2", "/Zc:__cplusplus", "/std:c++17", "/FIiso646.h"]
-    # else:
-    #     cxx_opt = ["-O3"]
-
     if HIP_BUILD:
         check_if_hip_home_none(PACKAGE_NAME)
         rocm_home = os.getenv("ROCM_PATH")
