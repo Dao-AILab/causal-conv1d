@@ -233,7 +233,7 @@ if not SKIP_CUDA_BUILD:
 
     ext_modules.append(
         CUDAExtension(
-            name="causal_conv1d_cuda",
+            name="causal_conv1d.causal_conv1d_cuda",
             sources=[
                 "csrc/causal_conv1d.cpp",
                 "csrc/causal_conv1d_fwd.cu",
