@@ -219,13 +219,13 @@ if not SKIP_CUDA_BUILD:
         CUDAExtension(
             name="causal_conv1d_cuda",
             sources=[
-                os.path.join(this_dir, "csrc", "causal_conv1d.cpp"),
-                os.path.join(this_dir, "csrc", "causal_conv1d_fwd.cu"),
-                os.path.join(this_dir, "csrc", "causal_conv1d_bwd.cu"),
-                os.path.join(this_dir, "csrc", "causal_conv1d_update.cu"),
+                "csrc/causal_conv1d.cpp",
+                "csrc/causal_conv1d_fwd.cu",
+                "csrc/causal_conv1d_bwd.cu",
+                "csrc/causal_conv1d_update.cu",                
             ],
             extra_compile_args=extra_compile_args,
-            include_dirs=[os.path.join(this_dir, "csrc", "causal_conv1d")],
+            include_dirs=["csrc/causal_conv1d"],
         )
     )
 
