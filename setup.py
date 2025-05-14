@@ -335,8 +335,9 @@ setup(
     cmdclass={"bdist_wheel": CachedWheelsCommand, "build_ext": BuildExtension} if ext_modules else {"bdist_wheel": CachedWheelsCommand},
     python_requires=">=3.9",
     install_requires=[
-        "torch",
+        "torch>=2.4.0",
+        "einops",
         "packaging",
-        "ninja",
-    ],
+        "ninja"
+    ]
 )
