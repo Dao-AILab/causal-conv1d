@@ -1,5 +1,7 @@
 # Copyright (c) 2024, Tri Dao.
+
 import torch
+import torch.nn.functional as F
 from typing import Optional, Tuple
 
 import causal_conv1d_cuda
@@ -216,20 +218,20 @@ def causal_conv1d_ref(
     seqlen = x.shape[-1]
     dim, width = weight.shape
     if initial_states is None:
-        out = torch.nn.functional.conv1d(x, weight.unsqueeze(1), bias, padding=width - 1, groups=dim)
+        out = F.conv1d(x, weight.unsqueeze(1), bias, padding=width - 1, groups=dim)
     else:
         x = torch.cat([initial_states, x], dim=-1)
-        out = torch.nn.functional.conv1d(x, weight.unsqueeze(1), bias, padding=0, groups=dim)
+        out = F.conv1d(x, weight.unsqueeze(1), bias, padding=0, groups=dim)
     out = out[..., :seqlen]
     if return_final_states:
-        final_states = torch.nn.functional.pad(x, (width - 1 - x.shape[-1], 0)).to(
+        final_states = F.pad(x, (width - 1 - x.shape[-1], 0)).to(
             dtype_in
         )  # (batch, dim, width - 1)
         if final_states_out is not None:
             final_states_out.copy_(final_states)
         else:
             final_states_out = final_states
-    out = (out if activation is None else torch.nn.functional.silu(out)).to(dtype=dtype_in)
+    out = (out if activation is None else F.silu(out)).to(dtype=dtype_in)
     return out if not return_final_states else (out, final_states_out)
 
 def causal_conv1d_update(
@@ -247,13 +249,13 @@ def causal_conv1d_update(
     weight: (dim, width)
     bias: (dim,)
     cache_seqlens: (batch,), dtype int32.
-    If not None, the conv_state is treated as a circular buffer.
-    The conv_state will be updated by copying x to the conv_state starting at the index
-    @cache_seqlens % state_len.
-    conv_state_indices: (batch,), dtype int32
-    If None, the conv_state is a larger tensor along the batch dim,
-    and we are selecting the batch coords specified by conv_state_indices.
-    Useful for a continuous batching scenario.
+        If not None, the conv_state is treated as a circular buffer.
+        The conv_state will be updated by copying x to the conv_state starting at the index
+        @cache_seqlens % state_len.
+        conv_state_indices: (batch,), dtype int32
+        If None, the conv_state is a larger tensor along the batch dim,
+        and we are selecting the batch coords specified by conv_state_indices.
+        Useful for a continuous batching scenario.
     
     out: (batch, dim) or (batch, dim, seqlen)
     """
@@ -284,9 +286,9 @@ def causal_conv1d_update_ref(
     weight: (dim, width)
     bias: (dim,)
     cache_seqlens: (batch,), dtype int32.
-    If not None, the conv_state is treated as a circular buffer.
-    The conv_state will be updated by copying x to the conv_state starting at the index
-    @cache_seqlens % state_len before performing the convolution.
+        If not None, the conv_state is treated as a circular buffer.
+        The conv_state will be updated by copying x to the conv_state starting at the index
+        @cache_seqlens % state_len before performing the convolution.
     
     out: (batch, dim) or (batch, dim, seqlen)
     """
@@ -311,7 +313,7 @@ def causal_conv1d_update_ref(
         copy_idx = torch.arange(seqlen, dtype=torch.long, device=x.device).unsqueeze(0) + cache_seqlens.unsqueeze(1)
         copy_idx = torch.remainder(copy_idx, state_len).unsqueeze(1).expand(-1, dim, -1)
         conv_state.scatter_(2, copy_idx, x)
-    out = torch.nn.functional.conv1d(x_new, weight.unsqueeze(1), bias, padding=0, groups=dim)[:, :, -seqlen:]
+    out = F.conv1d(x_new, weight.unsqueeze(1), bias, padding=0, groups=dim)[:, :, -seqlen:]
     if unsqueeze:
         out = out.squeeze(-1)
-    return (out if activation is None else torch.nn.functional.silu(out)).to(dtype=dtype_in)
+    return (out if activation is None else F.silu(out)).to(dtype=dtype_in)
