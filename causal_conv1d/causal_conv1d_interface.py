@@ -23,6 +23,7 @@ def custom_causal_conv1d_fwd(
 ):
     pass
 
+
 @torch.library.register_fake("custom_ops::causal_conv1d_fwd")
 def custom_causal_conv1d_fwd_fake(
     x, weight, bias, seq_idx, initial_states, final_states_out, activation
@@ -38,6 +39,7 @@ def custom_causal_conv1d_fwd_fake(
         final_states_fake = x.new_empty(0)
     
     return out_fake, final_states_fake
+
 
 @torch.library.register_kernel("custom_ops::causal_conv1d_fwd", "cuda")
 def custom_causal_conv1d_fwd_cuda(
@@ -64,6 +66,7 @@ def custom_causal_conv1d_fwd_cuda(
     
     return out, final_states_out
 
+
 @torch.library.custom_op(
     "custom_ops::causal_conv1d_bwd",
     device_types=["cuda"],
@@ -84,6 +87,7 @@ def custom_causal_conv1d_bwd(
 ):
     pass
 
+
 @torch.library.register_fake("custom_ops::causal_conv1d_bwd")
 def custom_causal_conv1d_bwd_fake(
     x, weight, bias, dout, seq_idx, initial_states, dfinal_states, dx_out, return_dinitial_states, activation
@@ -94,6 +98,7 @@ def custom_causal_conv1d_bwd_fake(
     dinitial_states = torch.empty_like(initial_states) if return_dinitial_states and initial_states is not None else None
     
     return dx, dweight, dbias, dinitial_states
+
 
 @torch.library.register_kernel("custom_ops::causal_conv1d_bwd", "cuda")
 def custom_causal_conv1d_bwd_cuda(
@@ -193,15 +198,9 @@ def causal_conv1d_fn(
     else:
         return out
 
-def causal_conv1d_ref(
-    x,
-    weight,
-    bias=None,
-    initial_states=None,
-    return_final_states=False,
-    final_states_out=None,
-    activation=None,
-):
+
+
+def causal_conv1d_ref(x, weight, bias=None, initial_states=None, return_final_states=False, final_states_out=None, activation=None):
     """
     x: (batch, dim, seqlen)
     weight: (dim, width)
@@ -234,15 +233,9 @@ def causal_conv1d_ref(
     out = (out if activation is None else F.silu(out)).to(dtype=dtype_in)
     return out if not return_final_states else (out, final_states_out)
 
-def causal_conv1d_update(
-    x, 
-    conv_state, 
-    weight, 
-    bias=None, 
-    activation=None, 
-    cache_seqlens=None,
-    conv_state_indices=None
-):
+
+
+def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, cache_seqlens=None, conv_state_indices=None):
     """
     x: (batch, dim) or (batch, dim, seqlen)
     conv_state: (batch, dim, state_len), where state_len >= width - 1
@@ -252,11 +245,11 @@ def causal_conv1d_update(
         If not None, the conv_state is treated as a circular buffer.
         The conv_state will be updated by copying x to the conv_state starting at the index
         @cache_seqlens % state_len.
-        conv_state_indices: (batch,), dtype int32
-        If None, the conv_state is a larger tensor along the batch dim,
+    conv_state_indices: (batch,), dtype int32
+        If None, the conv_state is a larger tensor along the batch dim, 
         and we are selecting the batch coords specified by conv_state_indices.
         Useful for a continuous batching scenario.
-    
+
     out: (batch, dim) or (batch, dim, seqlen)
     """
     if activation not in [None, "silu", "swish"]:
@@ -272,14 +265,8 @@ def causal_conv1d_update(
         out = out.squeeze(-1)
     return out
 
-def causal_conv1d_update_ref(
-    x, 
-    conv_state, 
-    weight, 
-    bias=None, 
-    activation=None, 
-    cache_seqlens=None
-):
+
+def causal_conv1d_update_ref(x, conv_state, weight, bias=None, activation=None, cache_seqlens=None):
     """
     x: (batch, dim) or (batch, dim, seqlen)
     conv_state: (batch, dim, state_len), where state_len >= width - 1
@@ -289,7 +276,7 @@ def causal_conv1d_update_ref(
         If not None, the conv_state is treated as a circular buffer.
         The conv_state will be updated by copying x to the conv_state starting at the index
         @cache_seqlens % state_len before performing the convolution.
-    
+
     out: (batch, dim) or (batch, dim, seqlen)
     """
     if activation not in [None, "silu", "swish"]:
