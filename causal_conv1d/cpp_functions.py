@@ -153,7 +153,7 @@ def causal_conv1d_bwd_function(
     )
 
     dweight = dweight.type_as(weight)
-    dbias = dweight.type_as(bias)
+    dbias = dbias.type_as(bias)
     return dx, dweight, dbias, dinitial_states
 
 
