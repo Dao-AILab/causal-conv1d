@@ -127,11 +127,13 @@ void set_conv_params_bwd(ConvParamsBwd &params,
     params.dx_l_stride = dx.stride(2);
 }
 
-at::Tensor
-causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
+void
+causal_conv1d_fwd(const at::Tensor &x,
+                  const at::Tensor &weight,
                   const c10::optional<at::Tensor> &bias_,
                   const c10::optional<at::Tensor> &seq_idx_,
                   const c10::optional<at::Tensor> &initial_states_,
+                  at::Tensor &out,
                   c10::optional<at::Tensor> &final_states_out_,
                   bool silu_activation) {
     auto input_type = x.scalar_type();
@@ -176,8 +178,6 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
         TORCH_CHECK(seq_idx.is_contiguous());
         CHECK_SHAPE(seq_idx, batch_size, seqlen);
     }
-
-    at::Tensor out = torch::empty_like(x);
 
     ConvParamsBase params;
     set_conv_params_fwd(params, batch_size, dim, seqlen, width, x, weight, out,
@@ -232,18 +232,20 @@ causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
             }
         });
     });
-    return out;
 }
 
-std::vector<at::Tensor>
-causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
+void
+causal_conv1d_bwd(const at::Tensor &x,
+                  const at::Tensor &weight,
                   const c10::optional<at::Tensor> &bias_,
                   at::Tensor &dout,
                   const c10::optional<at::Tensor> &seq_idx_,
                   const c10::optional<at::Tensor> &initial_states_,
                   const c10::optional<at::Tensor> &dfinal_states_,
-                  c10::optional<at::Tensor> &dx_,
-                  bool return_dinitial_states,
+                  at::Tensor &dx,
+                  at::Tensor &dweight,
+                  c10::optional<at::Tensor> &dbias_,
+                  c10::optional<at::Tensor> &dinitial_states_,
                   bool silu_activation) {
     auto input_type = x.scalar_type();
     auto weight_type = weight.scalar_type();
@@ -253,6 +255,7 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
     TORCH_CHECK(x.is_cuda());
     TORCH_CHECK(weight.is_cuda());
     TORCH_CHECK(dout.is_cuda());
+    TORCH_CHECK(bias_.has_value() == dbias_.has_value());
 
     const auto sizes = x.sizes();
     const int batch_size = sizes[0];
@@ -294,29 +297,19 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
         CHECK_SHAPE(seq_idx, batch_size, seqlen);
     }
 
-    at::Tensor dx;
-    if (dx_.has_value()) {
-        dx = dx_.value();
-        TORCH_CHECK(dx.scalar_type() == input_type);
-        TORCH_CHECK(dx.is_cuda());
-        CHECK_SHAPE(dx, batch_size, dim, seqlen);
-        if (!is_channel_last) { TORCH_CHECK(dx.stride(2) == 1); }
-        if (is_channel_last) { TORCH_CHECK(dx.stride(1) == 1); }
-    } else {
-        dx = torch::empty_like(x);
-    }
+    TORCH_CHECK(dx.scalar_type() == input_type);
+    TORCH_CHECK(dx.is_cuda());
+    CHECK_SHAPE(dx, batch_size, dim, seqlen);
+    if (!is_channel_last) { TORCH_CHECK(dx.stride(2) == 1); }
+    if (is_channel_last) { TORCH_CHECK(dx.stride(1) == 1); }
 
     // Otherwise the kernel will be launched from cuda:0 device
     at::cuda::CUDAGuard device_guard{x.device()};
 
-    at::Tensor dweight = torch::zeros_like(weight, weight.options().dtype(at::kFloat));
-    at::Tensor dbias;
-    if (bias_.has_value()) { dbias = torch::zeros_like(bias_.value(), bias_.value().options().dtype(at::kFloat)); }
-
     ConvParamsBwd params;
     set_conv_params_bwd(params, batch_size, dim, seqlen, width,
                         x, weight, bias_.has_value() ? bias_.value().data_ptr() : nullptr,
-                        dout, dx, dweight, bias_.has_value() ? dbias.data_ptr() : nullptr,
+                        dout, dx, dweight, bias_.has_value() ? dbias_.value().data_ptr() : nullptr,
                         silu_activation);
 
     if (seq_idx_.has_value()) {
@@ -354,9 +347,8 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
         params.dfinal_states_ptr = nullptr;
     }
 
-    at::Tensor dinitial_states;
-    if (return_dinitial_states) {
-        dinitial_states = torch::empty({batch_size, width - 1, dim}, x.options()).transpose(1, 2);
+    if (dinitial_states_.has_value()) {
+        at::Tensor dinitial_states = dinitial_states_.value();
         TORCH_CHECK(dinitial_states.stride(1) == 1);
         params.dinitial_states_ptr = dinitial_states.data_ptr();
         params.dinitial_states_batch_stride = dinitial_states.stride(0);
@@ -376,14 +368,14 @@ causal_conv1d_bwd(const at::Tensor &x, const at::Tensor &weight,
             }
         });
     });
-    return {dx, dweight.to(weight.dtype()), bias_.has_value() ? dbias.to(bias_.value().dtype()) : dbias, dinitial_states};
 }
 
-at::Tensor
+void
 causal_conv1d_update(const at::Tensor &x,
                      const at::Tensor &conv_state,
                      const at::Tensor &weight,
                      const c10::optional<at::Tensor> &bias_,
+                     at::Tensor &out,
                      bool silu_activation,
                      const c10::optional<at::Tensor> &cache_seqlens_,
                      const c10::optional<at::Tensor> &conv_state_indices_
@@ -418,8 +410,6 @@ causal_conv1d_update(const at::Tensor &x,
         TORCH_CHECK(bias.stride(-1) == 1);
         CHECK_SHAPE(bias, dim);
     }
-
-    at::Tensor out = torch::empty_like(x);
 
     ConvParamsBase params;
     set_conv_params_fwd(params, batch_size, dim, seqlen, width, x, weight, out,
@@ -467,7 +457,6 @@ causal_conv1d_update(const at::Tensor &x,
             causal_conv1d_update_cuda<input_t, weight_t>(params, stream);
         });
     });
-    return out;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
