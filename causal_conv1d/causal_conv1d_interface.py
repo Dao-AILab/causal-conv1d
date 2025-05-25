@@ -3,8 +3,7 @@
 import torch
 import torch.nn.functional as F
 
-
-import causal_conv1d_cuda
+from causal_conv1d.cpp_functions import causal_conv1d_fwd_function, causal_conv1d_bwd_function, causal_conv1d_update_function
 
 
 class CausalConv1dFn(torch.autograd.Function):
@@ -54,7 +53,7 @@ class CausalConv1dFn(torch.autograd.Function):
         else:
             final_states_out = None
         ctx.activation = activation in ["silu", "swish"]
-        out = causal_conv1d_cuda.causal_conv1d_fwd(
+        out = causal_conv1d_fwd_function(
             x, weight, bias, seq_idx, initial_states, final_states_out, ctx.activation
         )
         ctx.save_for_backward(x, weight, bias, seq_idx, initial_states)
@@ -73,7 +72,7 @@ class CausalConv1dFn(torch.autograd.Function):
         # The kernel supports passing in a pre-allocated dx (e.g., in case we want to fuse the
         # backward of conv1d with the backward of chunk).
         # Here we just pass in None and dx will be allocated in the C++ code.
-        dx, dweight, dbias, dinitial_states = causal_conv1d_cuda.causal_conv1d_bwd(
+        dx, dweight, dbias, dinitial_states = causal_conv1d_bwd_function(
             x,
             weight,
             bias,
@@ -195,7 +194,7 @@ def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, cach
     unsqueeze = x.dim() == 2
     if unsqueeze:
         x = x.unsqueeze(-1)
-    out = causal_conv1d_cuda.causal_conv1d_update(
+    out = causal_conv1d_update_function(
         x, conv_state, weight, bias, activation, cache_seqlens, conv_state_indices
     )
     if unsqueeze:
