@@ -68,7 +68,7 @@ def _causal_conv1d_bwd_cpp(
     )
 
 
-@torch.library.custom_op(f"{LIBRARY_NAME}::_causal_conv1d_update_cpp", mutates_args={"out"})
+@torch.library.custom_op(f"{LIBRARY_NAME}::_causal_conv1d_update_cpp", mutates_args={"out", "conv_state"})
 def _causal_conv1d_update_cpp(
     x: torch.Tensor,
     conv_state: torch.Tensor,
