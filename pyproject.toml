@@ -1,0 +1,48 @@
+[build-system]
+requires = [
+    "setuptools>=61.0",
+    "wheel",
+    "torch>=2.4.0",
+    "packaging",
+    "ninja"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "causal_conv1d"
+dynamic = ["version"]
+description = "Efficient 1D causal convolution kernel for PyTorch"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Tri Dao", email = "trid@cs.stanford.edu"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.4.0",
+    "einops"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Dao-AILab/causal-conv1d"
+"Bug Tracker" = "https://github.com/Dao-AILab/causal-conv1d/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "causal_conv1d.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["causal_conv1d*"] 
