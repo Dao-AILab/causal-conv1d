@@ -1,7 +1,9 @@
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
-
+#ifdef _WIN32
+#include <ciso646>  // Enables 'and', 'or', 'not' keywords on MSVC
+#endif
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/python.h>
