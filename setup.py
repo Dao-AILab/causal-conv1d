@@ -9,21 +9,18 @@ import ast
 from pathlib import Path
 from packaging.version import parse, Version
 import platform
-
-from setuptools import setup, find_packages
 import subprocess
-
 import urllib.request
 import urllib.error
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
+from setuptools import setup, find_packages
+
 import torch
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME, HIP_HOME
 
-
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
-
 
 # ninja build does not work unless include_dirs are abs path
 this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -56,32 +53,31 @@ def get_platform():
 
 
 def get_cuda_bare_metal_version(cuda_dir):
-    raw_output = subprocess.check_output(
-        [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
-    )
+    # Build nvcc executable path in an OS-independent way.
+    nvcc_executable = os.path.join(cuda_dir, "bin", "nvcc")
+    if sys.platform == "win32":
+        nvcc_executable += ".exe"
+    print(f"nvcc_executable = {nvcc_executable}")
+    raw_output = subprocess.check_output([nvcc_executable, "-V"], universal_newlines=True)
     output = raw_output.split()
     release_idx = output.index("release") + 1
     bare_metal_version = parse(output[release_idx].split(",")[0])
-
     return raw_output, bare_metal_version
 
 
 def get_hip_version(rocm_dir):
-
     hipcc_bin = "hipcc" if rocm_dir is None else os.path.join(rocm_dir, "bin", "hipcc")
     try:
-        raw_output = subprocess.check_output(
-            [hipcc_bin, "--version"], universal_newlines=True
-        )
+        raw_output = subprocess.check_output([hipcc_bin, "--version"], universal_newlines=True)
     except Exception as e:
         print(
             f"hip installation not found: {e} ROCM_PATH={os.environ.get('ROCM_PATH')}"
         )
         return None, None
-    
+
     for line in raw_output.split("\n"):
         if "HIP version" in line:
-            rocm_version = parse(line.split()[-1].replace("-", "+")) # local version is not parsed correctly
+            rocm_version = parse(line.split()[-1].replace("-", "+"))
             return line, rocm_version
 
     return None, None
@@ -95,11 +91,8 @@ def get_torch_hip_version():
 
 
 def check_if_hip_home_none(global_option: str) -> None:
-    
     if HIP_HOME is not None:
         return
-    # warn instead of error because user could be downloading prebuilt wheels, so hipcc won't be necessary
-    # in that case.
     warnings.warn(
         f"{global_option} was requested, but hipcc was not found.  Are you sure your environment has hipcc available?"
     )
@@ -108,8 +101,6 @@ def check_if_hip_home_none(global_option: str) -> None:
 def check_if_cuda_home_none(global_option: str) -> None:
     if CUDA_HOME is not None:
         return
-    # warn instead of error because user could be downloading prebuilt wheels, so nvcc won't be necessary
-    # in that case.
     warnings.warn(
         f"{global_option} was requested, but nvcc was not found.  Are you sure your environment has nvcc available?  "
         "If you're installing within a container from https://hub.docker.com/r/pytorch/pytorch, "
@@ -124,7 +115,6 @@ def append_nvcc_threads(nvcc_extra_args):
 cmdclass = {}
 ext_modules = []
 
-
 HIP_BUILD = bool(torch.version.hip)
 
 if not SKIP_CUDA_BUILD:
@@ -133,16 +123,13 @@ if not SKIP_CUDA_BUILD:
     TORCH_MAJOR = int(torch.__version__.split(".")[0])
     TORCH_MINOR = int(torch.__version__.split(".")[1])
 
-
     cc_flag = []
 
     if HIP_BUILD:
         check_if_hip_home_none(PACKAGE_NAME)
-
         rocm_home = os.getenv("ROCM_PATH")
         _, hip_version = get_hip_version(rocm_home)
 
-        
         if HIP_HOME is not None:
             if hip_version < Version("6.0"):
                 raise RuntimeError(
@@ -157,11 +144,8 @@ if not SKIP_CUDA_BUILD:
                 )
 
         cc_flag.append("-DBUILD_PYTHON_PACKAGE")
-
     else:
         check_if_cuda_home_none(PACKAGE_NAME)
-        # Check, if CUDA11 is installed for compute capability 8.0
-        
         if CUDA_HOME is not None:
             _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
             if bare_metal_version < Version("11.6"):
@@ -169,7 +153,6 @@ if not SKIP_CUDA_BUILD:
                     f"{PACKAGE_NAME} is only supported on CUDA 11.6 and above.  "
                     "Note: make sure nvcc has a supported version by running nvcc -V."
                 )
-                    
         cc_flag.append("-gencode")
         cc_flag.append("arch=compute_53,code=sm_53")
         cc_flag.append("-gencode")
@@ -182,36 +165,40 @@ if not SKIP_CUDA_BUILD:
         cc_flag.append("arch=compute_80,code=sm_80")
         cc_flag.append("-gencode")
         cc_flag.append("arch=compute_87,code=sm_87")
-        if bare_metal_version >= Version("11.8"):
+        if CUDA_HOME is not None and bare_metal_version >= Version("11.8"):
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_90,code=sm_90")
         if bare_metal_version >= Version("12.8"):
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_100,code=sm_100")
 
+    # Set the C++ optimization flag appropriately for the platform.
+    if sys.platform == "win32":
+        cxx_opt = ["/O2", "/Zc:__cplusplus", "/std:c++17", "/FIiso646.h"]
+    else:
+        cxx_opt = ["-O3"]
+
     # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
     # torch._C._GLIBCXX_USE_CXX11_ABI
-    # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
     if FORCE_CXX11_ABI:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
 
-
     if HIP_BUILD:
         extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17"],
+            "cxx": cxx_opt + ["-std=c++17"],
             "nvcc": [
-                "-O3",
-                "-std=c++17",
-                f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
-                "-U__CUDA_NO_HALF_OPERATORS__",
-                "-U__CUDA_NO_HALF_CONVERSIONS__",
-                "-fgpu-flush-denormals-to-zero",
-            ]
-            + cc_flag,
+                        "-O3",
+                        "-std=c++17",
+                        f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
+                        "-U__CUDA_NO_HALF_OPERATORS__",
+                        "-U__CUDA_NO_HALF_CONVERSIONS__",
+                        "-fgpu-flush-denormals-to-zero",
+                        "-allow-unsupported-compiler"
+                    ] + cc_flag,
         }
     else:
         extra_compile_args = {
-            "cxx": ["-O3"],
+            "cxx": cxx_opt,
             "nvcc": append_nvcc_threads(
                 [
                     "-O3",
@@ -226,8 +213,8 @@ if not SKIP_CUDA_BUILD:
                     "--use_fast_math",
                     "--ptxas-options=-v",
                     "-lineinfo",
-                ]
-                + cc_flag
+                    "-allow-unsupported-compiler"
+                ] + cc_flag
             ),
         }
 
@@ -238,10 +225,10 @@ if not SKIP_CUDA_BUILD:
                 "csrc/causal_conv1d.cpp",
                 "csrc/causal_conv1d_fwd.cu",
                 "csrc/causal_conv1d_bwd.cu",
-                "csrc/causal_conv1d_update.cu",
+                "csrc/causal_conv1d_update.cu",                
             ],
             extra_compile_args=extra_compile_args,
-            include_dirs=[Path(this_dir) / "csrc" / "causal_conv1d"],
+            include_dirs=["csrc/causal_conv1d"],
         )
     )
 
@@ -258,23 +245,17 @@ def get_package_version():
 
 
 def get_wheel_url():
-
     # Determine the version numbers that will be used to determine the correct wheel
     torch_version_raw = parse(torch.__version__)
 
     if HIP_BUILD:
-        # We're using the HIP version used to build torch, not the one currently installed
         torch_hip_version = get_torch_hip_version()
         hip_version = f"{torch_hip_version.major}{torch_hip_version.minor}"
     else:
-        # We're using the CUDA version used to build torch, not the one currently installed
-        # _, cuda_version_raw = get_cuda_bare_metal_version(CUDA_HOME)
         torch_cuda_version = parse(torch.version.cuda)
-        # For CUDA 11, we only compile for CUDA 11.8, and for CUDA 12 we only compile for CUDA 12.3
-        # to save CI time. Minor versions should be compatible.
         torch_cuda_version = parse("11.8") if torch_cuda_version.major == 11 else parse("12.3")
         cuda_version = f"{torch_cuda_version.major}"
-    
+
     gpu_compute_version = hip_version if HIP_BUILD else cuda_version
     cuda_or_hip = "hip" if HIP_BUILD else "cu"
 
@@ -285,7 +266,6 @@ def get_wheel_url():
     torch_version = f"{torch_version_raw.major}.{torch_version_raw.minor}"
     cxx11_abi = str(torch._C._GLIBCXX_USE_CXX11_ABI).upper()
 
-    # Determine wheel URL based on CUDA version, torch version, python version and OS
     wheel_filename = f"{PACKAGE_NAME}-{causal_conv1d_version}+{cuda_or_hip}{gpu_compute_version}torch{torch_version}cxx11abi{cxx11_abi}-{python_version}-{python_version}-{platform_name}.whl"
 
     wheel_url = BASE_WHEEL_URL.format(
@@ -301,7 +281,6 @@ class CachedWheelsCommand(_bdist_wheel):
     the environment parameters to detect whether there is already a pre-built version of a compatible
     wheel available and short-circuits the standard full build pipeline.
     """
-
     def run(self):
         if FORCE_BUILD:
             return super().run()
@@ -356,15 +335,12 @@ setup(
         "Operating System :: Unix",
     ],
     ext_modules=ext_modules,
-    cmdclass={"bdist_wheel": CachedWheelsCommand, "build_ext": BuildExtension}
-    if ext_modules
-    else {
-        "bdist_wheel": CachedWheelsCommand,
-    },
+    cmdclass={"bdist_wheel": CachedWheelsCommand, "build_ext": BuildExtension} if ext_modules else {"bdist_wheel": CachedWheelsCommand},
     python_requires=">=3.9",
     install_requires=[
-        "torch",
+        "torch>=2.4.0",
+        "einops",
         "packaging",
-        "ninja",
-    ],
+        "ninja"
+    ]
 )

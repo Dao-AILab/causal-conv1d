@@ -18,6 +18,21 @@
 #include "causal_conv1d_common.h"
 #include "static_switch.h"
 
+// Helper function to set the maximum dynamic shared memory attribute.
+// This function is defined at file scope so that the preprocessor directives
+// are not embedded inside a lambda.
+template <typename KernelT>
+void set_max_dynamic_shared_memory(KernelT kernel, int smem_size) {
+    if (smem_size >= 48 * 1024) {
+#ifndef USE_ROCM
+        C10_CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+#else
+        C10_CUDA_CHECK(cudaFuncSetAttribute((void*)kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+        std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior.\n" << std::endl;
+#endif
+    }
+}
+
 template<int kNThreads_, int kWidth_, bool kIsVecLoad_, typename input_t_, typename weight_t_>
 struct Causal_conv1d_fwd_kernel_traits {
     using input_t = input_t_;
@@ -78,7 +93,9 @@ void causal_conv1d_fwd_kernel(ConvParamsBase params) {
 
     float weight_vals[kWidth];
     #pragma unroll
-    for (int i = 0; i < kWidth; ++i) { weight_vals[i] = float(weight[i * params.weight_width_stride]); }
+    for (int i = 0; i < kWidth; ++i) {
+        weight_vals[i] = float(weight[i * params.weight_width_stride]);
+    }
 
     constexpr int kChunkSize = kNThreads * kNElts;
     const int n_chunks = (params.seqlen + kChunkSize - 1) / kChunkSize;
@@ -94,16 +111,22 @@ void causal_conv1d_fwd_kernel(ConvParamsBase params) {
         __syncthreads();
         // Thread kNThreads - 1 don't write yet, so that thread 0 can read
         // the last elements of the previous chunk.
-        if (tidx < kNThreads - 1) { smem_exchange[tidx] = reinterpret_cast<vec_t *>(x_vals_load)[1]; }
+        if (tidx < kNThreads - 1) {
+            smem_exchange[tidx] = reinterpret_cast<vec_t *>(x_vals_load)[1];
+        }
         __syncthreads();
         reinterpret_cast<vec_t *>(x_vals_load)[0] = smem_exchange[tidx > 0 ? tidx - 1 : kNThreads - 1];
         __syncthreads();
         // Now thread kNThreads - 1 can write the last elements of the current chunk.
-        if (tidx == kNThreads - 1) { smem_exchange[tidx] = reinterpret_cast<vec_t *>(x_vals_load)[1]; }
+        if (tidx == kNThreads - 1) {
+            smem_exchange[tidx] = reinterpret_cast<vec_t *>(x_vals_load)[1];
+        }
 
         float x_vals[2 * kNElts];
         #pragma unroll
-        for (int i = 0; i < 2 * kNElts; ++i) { x_vals[i] = float(x_vals_load[i]); }
+        for (int i = 0; i < 2 * kNElts; ++i) {
+            x_vals[i] = float(x_vals_load[i]);
+        }
 
         float out_vals[kNElts];
         #pragma unroll
@@ -124,7 +147,9 @@ void causal_conv1d_fwd_kernel(ConvParamsBase params) {
 
         input_t out_vals_store[kNElts];
         #pragma unroll
-        for (int i = 0; i < kNElts; ++i) { out_vals_store[i] = out_vals[i]; }
+        for (int i = 0; i < kNElts; ++i) {
+            out_vals_store[i] = out_vals[i];
+        }
         if constexpr(kIsVecLoad) {
             typename Ktraits::BlockStoreVecT(smem_store_vec).Store(reinterpret_cast<vec_t*>(out), reinterpret_cast<vec_t (&)[1]>(out_vals_store), (params.seqlen - chunk * kChunkSize) / kNElts);
         } else {
@@ -141,20 +166,11 @@ void causal_conv1d_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
         using Ktraits = Causal_conv1d_fwd_kernel_traits<kNThreads, kWidth, kIsVecLoad, input_t, weight_t>;
         constexpr int kSmemSize = Ktraits::kSmemSize;
         dim3 grid(params.batch, params.dim);
-
         auto kernel = &causal_conv1d_fwd_kernel<Ktraits>;
 
-        if (kSmemSize >= 48 * 1024) {
-            #ifndef USE_ROCM
-            C10_CUDA_CHECK(cudaFuncSetAttribute(
-                kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            #else
-            // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
-            C10_CUDA_CHECK(cudaFuncSetAttribute(
-                (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
-            #endif
-        }
+        // Use the helper function to set the dynamic shared memory attribute.
+        set_max_dynamic_shared_memory(kernel, kSmemSize);
+
         kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
 
         C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -325,12 +341,16 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
                 out_vals[i] += seq_idx_thread[i + w] == seq_idx_cur ? weight_vals[w] * x_vals[i + w] : 0.f;
             }
         }
-        if (params.silu_activation) {out_vals[i] = out_vals[i] / (1 + expf(-out_vals[i])); }
+        if (params.silu_activation) {
+            out_vals[i] = out_vals[i] / (1 + expf(-out_vals[i]));
+        }
     }
 
     __syncthreads();
     #pragma unroll
-    for (int i = 0; i < kLPerThread; ++i) { x_smem[col_idx * kLPerThread + i][row_idx] = out_vals[i]; }
+    for (int i = 0; i < kLPerThread; ++i) {
+        x_smem[col_idx * kLPerThread + i][row_idx] = out_vals[i];
+    }
     __syncthreads();
 
     #pragma unroll
