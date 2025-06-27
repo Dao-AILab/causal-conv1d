@@ -15,7 +15,7 @@ description = "Causal depthwise conv1d in CUDA, with a PyTorch interface"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 authors = [{name = "Tri Dao", email = "tri@tridao.me"}]
-requires-python = ">=3.9"
+requires-python = ">=3.9, <3.13"
 dependencies = [
     "torch>=1.12.0",  # Flexible constraint
     "packaging",
