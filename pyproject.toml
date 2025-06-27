@@ -1,0 +1,33 @@
+[build-system]
+requires = [
+    "setuptools>=61.0",
+    "wheel", 
+    "torch>=1.12.0",  # Minimum version that supports the features used
+    "packaging",
+    "ninja"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "causal-conv1d"
+dynamic = ["version"]
+description = "Causal depthwise conv1d in CUDA, with a PyTorch interface"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+authors = [{name = "Tri Dao", email = "tri@tridao.me"}]
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=1.12.0",  # Flexible constraint
+    "packaging",
+    "ninja",
+]
+
+[project.urls]
+Homepage = "https://github.com/Dao-AILab/causal-conv1d"
+Repository = "https://github.com/Dao-AILab/causal-conv1d"
+
+[tool.setuptools]
+packages = ["causal_conv1d"]
+
+[tool.setuptools.dynamic]
+version = {attr = "causal_conv1d.__version__"}
