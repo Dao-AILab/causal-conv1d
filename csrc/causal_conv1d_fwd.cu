@@ -137,28 +137,36 @@ void causal_conv1d_fwd_kernel(ConvParamsBase params) {
 template<int kNThreads, int kWidth, typename input_t, typename weight_t>
 void causal_conv1d_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
     static constexpr int kNElts = sizeof(input_t) == 4 ? 4 : 8;
+    
+    #ifndef USE_ROCM
     BOOL_SWITCH(params.seqlen % kNElts == 0, kIsVecLoad, [&] {
         using Ktraits = Causal_conv1d_fwd_kernel_traits<kNThreads, kWidth, kIsVecLoad, input_t, weight_t>;
         constexpr int kSmemSize = Ktraits::kSmemSize;
         dim3 grid(params.batch, params.dim);
-
         auto kernel = &causal_conv1d_fwd_kernel<Ktraits>;
-
         if (kSmemSize >= 48 * 1024) {
-            #ifndef USE_ROCM
             C10_CUDA_CHECK(cudaFuncSetAttribute(
                 kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            #else
+        }
+        kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
+    #else
+    BOOL_SWITCH(params.seqlen % kNElts == 0, kIsVecLoad, [&] {
+        using Ktraits = Causal_conv1d_fwd_kernel_traits<kNThreads, kWidth, kIsVecLoad, input_t, weight_t>;
+        constexpr int kSmemSize = Ktraits::kSmemSize;
+        dim3 grid(params.batch, params.dim);
+        auto kernel = &causal_conv1d_fwd_kernel<Ktraits>;
+        if (kSmemSize >= 48 * 1024) {
             // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
             C10_CUDA_CHECK(cudaFuncSetAttribute(
                 (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
             std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
-            #endif
         }
         kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
+    #endif
 }
 
 template<typename input_t, typename weight_t>
