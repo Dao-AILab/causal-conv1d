@@ -1,4 +1,3 @@
-include csrc/*.h
-include csrc/*.cu
+recursive-include csrc *
 recursive-include third_party *
 README.md
