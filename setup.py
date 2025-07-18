@@ -18,7 +18,13 @@ import urllib.error
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 import torch
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension, CUDA_HOME, HIP_HOME
+from torch.utils.cpp_extension import (
+    BuildExtension,
+    CppExtension,
+    CUDAExtension,
+    CUDA_HOME,
+    HIP_HOME,
+)
 
 
 with open("README.md", "r", encoding="utf-8") as fh:
@@ -67,7 +73,6 @@ def get_cuda_bare_metal_version(cuda_dir):
 
 
 def get_hip_version(rocm_dir):
-
     hipcc_bin = "hipcc" if rocm_dir is None else os.path.join(rocm_dir, "bin", "hipcc")
     try:
         raw_output = subprocess.check_output(
@@ -78,10 +83,12 @@ def get_hip_version(rocm_dir):
             f"hip installation not found: {e} ROCM_PATH={os.environ.get('ROCM_PATH')}"
         )
         return None, None
-    
+
     for line in raw_output.split("\n"):
         if "HIP version" in line:
-            rocm_version = parse(line.split()[-1].replace("-", "+")) # local version is not parsed correctly
+            rocm_version = parse(
+                line.split()[-1].replace("-", "+")
+            )  # local version is not parsed correctly
             return line, rocm_version
 
     return None, None
@@ -95,7 +102,6 @@ def get_torch_hip_version():
 
 
 def check_if_hip_home_none(global_option: str) -> None:
-    
     if HIP_HOME is not None:
         return
     # warn instead of error because user could be downloading prebuilt wheels, so hipcc won't be necessary
@@ -128,11 +134,9 @@ ext_modules = []
 HIP_BUILD = bool(torch.version.hip)
 
 if not SKIP_CUDA_BUILD:
-
     print("\n\ntorch.__version__  = {}\n\n".format(torch.__version__))
     TORCH_MAJOR = int(torch.__version__.split(".")[0])
     TORCH_MINOR = int(torch.__version__.split(".")[1])
-
 
     cc_flag = []
 
@@ -142,7 +146,6 @@ if not SKIP_CUDA_BUILD:
         rocm_home = os.getenv("ROCM_PATH")
         _, hip_version = get_hip_version(rocm_home)
 
-        
         if HIP_HOME is not None:
             if hip_version < Version("6.0"):
                 raise RuntimeError(
@@ -153,7 +156,7 @@ if not SKIP_CUDA_BUILD:
                 warnings.warn(
                     f"{PACKAGE_NAME} requires a patch to be applied when running on ROCm 6.0. "
                     "Refer to the README.md for detailed instructions.",
-                    UserWarning
+                    UserWarning,
                 )
 
         cc_flag.append("-DBUILD_PYTHON_PACKAGE")
@@ -161,7 +164,7 @@ if not SKIP_CUDA_BUILD:
     else:
         check_if_cuda_home_none(PACKAGE_NAME)
         # Check, if CUDA11 is installed for compute capability 8.0
-        
+
         if CUDA_HOME is not None:
             _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
             if bare_metal_version < Version("11.6"):
@@ -169,7 +172,7 @@ if not SKIP_CUDA_BUILD:
                     f"{PACKAGE_NAME} is only supported on CUDA 11.6 and above.  "
                     "Note: make sure nvcc has a supported version by running nvcc -V."
                 )
-                    
+
         cc_flag.append("-gencode")
         cc_flag.append("arch=compute_53,code=sm_53")
         cc_flag.append("-gencode")
@@ -194,7 +197,6 @@ if not SKIP_CUDA_BUILD:
     # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
     if FORCE_CXX11_ABI:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
-
 
     if HIP_BUILD:
         extra_compile_args = {
@@ -241,7 +243,7 @@ if not SKIP_CUDA_BUILD:
                 "csrc/causal_conv1d_update.cu",
             ],
             extra_compile_args=extra_compile_args,
-            include_dirs=[Path(this_dir) / "csrc" / "causal_conv1d"],
+            include_dirs=[Path(this_dir) / "csrc"],
         )
     )
 
@@ -258,7 +260,6 @@ def get_package_version():
 
 
 def get_wheel_url():
-
     # Determine the version numbers that will be used to determine the correct wheel
     torch_version_raw = parse(torch.__version__)
 
@@ -272,9 +273,11 @@ def get_wheel_url():
         torch_cuda_version = parse(torch.version.cuda)
         # For CUDA 11, we only compile for CUDA 11.8, and for CUDA 12 we only compile for CUDA 12.3
         # to save CI time. Minor versions should be compatible.
-        torch_cuda_version = parse("11.8") if torch_cuda_version.major == 11 else parse("12.3")
+        torch_cuda_version = (
+            parse("11.8") if torch_cuda_version.major == 11 else parse("12.3")
+        )
         cuda_version = f"{torch_cuda_version.major}"
-    
+
     gpu_compute_version = hip_version if HIP_BUILD else cuda_version
     cuda_or_hip = "hip" if HIP_BUILD else "cu"
 
