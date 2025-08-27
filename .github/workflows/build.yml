@@ -44,5 +44,5 @@ jobs:
       cuda-version: ${{ inputs.cuda-version || '12.9.1' }}
       torch-version: ${{ inputs.torch-version || '2.7.1' }}
       cxx11_abi: ${{ inputs.cxx11_abi || 'FALSE' }}
-      upload-to-release: ${{ inputs.upload-to-release || 'false' }}
+      upload-to-release: ${{ inputs.upload-to-release || false }}
       release-version: ${{ inputs.release-version || 'v1.5.2' }}
