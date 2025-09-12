@@ -306,6 +306,13 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
     }
     int seq_idx_thread[kWidth - 1 + kLPerThread];
     if constexpr (kHasSeqIdx) {
+        // For padding tokens (seq_idx < 0), we skip the computation and set the output to 0.
+        if constexpr (kHasSeqIdx) {
+            if (seq_idx_cur < 0) {
+                out_vals[i] = 0.f;
+                continue;
+            }
+        }
         #pragma unroll
         for (int i = 0; i < kWidth - 1 + kLPerThread; ++i) {
             seq_idx_thread[i] = chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i - (kWidth - 1) >= 0 ? seq_idx[col_idx * kLPerThread + i - (kWidth - 1)] : -1;
