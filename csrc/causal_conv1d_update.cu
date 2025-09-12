@@ -28,8 +28,8 @@ void causal_conv1d_update_kernel(ConvParamsBase params) {
     using input_t = typename Ktraits::input_t;
     using weight_t = typename Ktraits::weight_t;
 
-    const int batch_id = blockIdx.x;
     const int tidx = threadIdx.x;
+    const int batch_id = blockIdx.x;
     const int channel_id = blockIdx.y * kNThreads + tidx;
     if (channel_id >= params.dim) return;
 
