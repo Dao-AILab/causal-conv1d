@@ -39,7 +39,6 @@ void causal_conv1d_update_kernel(ConvParamsBase params) {
     }
 
     const int tidx = threadIdx.x;
-    const int batch_id = blockIdx.x;
     const int channel_id = blockIdx.y * kNThreads + tidx;
     if (channel_id >= params.dim) return;
 
