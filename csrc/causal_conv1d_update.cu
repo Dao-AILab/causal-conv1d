@@ -28,6 +28,16 @@ void causal_conv1d_update_kernel(ConvParamsBase params) {
     using input_t = typename Ktraits::input_t;
     using weight_t = typename Ktraits::weight_t;
 
+    const int batch_id = blockIdx.x;
+    const int conv_state_batch_coord = params.conv_state_indices_ptr == nullptr
+        ? batch_id
+        : params.conv_state_indices_ptr[batch_id];
+
+    // If conv_state_batch_coord is < 0, it's a padding token, so we skip the work for this entire block.
+    if (conv_state_batch_coord < 0) {
+        return;
+    }
+
     const int tidx = threadIdx.x;
     const int batch_id = blockIdx.x;
     const int channel_id = blockIdx.y * kNThreads + tidx;
