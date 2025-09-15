@@ -35,22 +35,27 @@ void causal_conv1d_update_kernel(ConvParamsBase params) {
 
     input_t *x = reinterpret_cast<input_t *>(params.x_ptr) + batch_id * params.x_batch_stride
         + channel_id * params.x_c_stride;
+    input_t *out = reinterpret_cast<input_t *>(params.out_ptr) + batch_id * params.out_batch_stride
+        + channel_id * params.out_c_stride;
 
     // If params.conv_state_batch_indices is set, then the conv state is gathered from the conv state tensor
     // along the batch axis. Otherwise, the conv state coordinate is the same as the batch id.
     const int conv_state_batch_coord = params.conv_state_indices_ptr == nullptr
         ? batch_id
         : params.conv_state_indices_ptr[batch_id];
+
     // Skip padding tokens.
     if (conv_state_batch_coord < 0) {
+        #pragma unroll 2
+        for (int i = 0; i < params.seqlen; ++i) {
+            out[i * params.out_l_stride] = input_t(0.f);
+        }
         return;
     }
-    input_t *conv_state = reinterpret_cast<input_t *>(params.conv_state_ptr) 
+    input_t *conv_state = reinterpret_cast<input_t *>(params.conv_state_ptr)
         + conv_state_batch_coord * params.conv_state_batch_stride
         + channel_id * params.conv_state_c_stride;
     weight_t *weight = reinterpret_cast<weight_t *>(params.weight_ptr) + channel_id * params.weight_c_stride;
-    input_t *out = reinterpret_cast<input_t *>(params.out_ptr) + batch_id * params.out_batch_stride
-        + channel_id * params.out_c_stride;
     float bias_val = params.bias_ptr == nullptr ? 0.f : float(reinterpret_cast<weight_t *>(params.bias_ptr)[channel_id]);
 
     int state_len = params.conv_state_len;
