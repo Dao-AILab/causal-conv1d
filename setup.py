@@ -378,6 +378,8 @@ setup(
     install_requires=[
         "torch",
         "packaging",
+    ],
+    setup_requires=[
         "ninja",
     ],
 )
