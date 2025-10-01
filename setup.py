@@ -288,7 +288,11 @@ def get_wheel_url():
     platform_name = get_platform()
     causal_conv1d_version = get_package_version()
 
-    torch_version = f"{torch_version_raw.major}.{torch_version_raw.minor}"
+    if os.environ.get("NVIDIA_PRODUCT_NAME", "") == "PyTorch":
+        torch_version = str(os.environ.get("NVIDIA_PYTORCH_VERSION"))
+    else:
+        torch_version = f"{torch_version_raw.major}.{torch_version_raw.minor}"
+
     cxx11_abi = str(torch._C._GLIBCXX_USE_CXX11_ABI).upper()
 
     # Determine wheel URL based on CUDA version, torch version, python version and OS
