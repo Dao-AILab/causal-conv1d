@@ -65,7 +65,7 @@ jobs:
       release-version: ${{ needs.setup_release.outputs.release-version }}
       upload-to-release: true
 
-  heck_for_ngc_images:
+  check_for_ngc_images:
     runs-on: ubuntu-latest
     outputs:
       images: ${{ steps.check_for_ngc_images.outputs.IMAGES }}
