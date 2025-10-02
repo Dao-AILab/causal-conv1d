@@ -85,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04]
+        os: [ubuntu-22.04]
         container-image: ${{ fromJson(needs.check_for_ngc_images.outputs.images) }}
     uses: ./.github/workflows/_build.yml
     with:
