@@ -48,6 +48,11 @@ jobs:
           ref: ${{ inputs.release-version }}
           submodules: recursive
 
+      - name: Checkout build scripts
+        uses: actions/checkout@v4
+        with:
+          path: build-scripts/
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
