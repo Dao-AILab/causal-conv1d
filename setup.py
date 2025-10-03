@@ -194,6 +194,13 @@ if not SKIP_CUDA_BUILD:
             cc_flag.append("arch=compute_100,code=sm_100")
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_120,code=sm_120")
+        if bare_metal_version >= Version("13.0"):
+            cc_flag.append("-gencode")
+            cc_flag.append("arch=compute_103,code=sm_103")
+            cc_flag.append("-gencode")
+            cc_flag.append("arch=compute_110,code=sm_110")
+            cc_flag.append("-gencode")
+            cc_flag.append("arch=compute_121,code=sm_121")
 
     # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
     # torch._C._GLIBCXX_USE_CXX11_ABI
@@ -288,7 +295,11 @@ def get_wheel_url():
     platform_name = get_platform()
     causal_conv1d_version = get_package_version()
 
-    torch_version = f"{torch_version_raw.major}.{torch_version_raw.minor}"
+    if os.environ.get("NVIDIA_PRODUCT_NAME", "") == "PyTorch":
+        torch_version = str(os.environ.get("NVIDIA_PYTORCH_VERSION"))
+    else:
+        torch_version = f"{torch_version_raw.major}.{torch_version_raw.minor}"
+
     cxx11_abi = str(torch._C._GLIBCXX_USE_CXX11_ABI).upper()
 
     # Determine wheel URL based on CUDA version, torch version, python version and OS
