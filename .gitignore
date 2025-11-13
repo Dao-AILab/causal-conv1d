@@ -2,5 +2,5 @@
 *.egg-info/
 build/
 **.so
-*.hip
-*_hip.*
+# *.hip
+# *_hip.*
