@@ -3,6 +3,7 @@
 Features:
 - Support fp32, fp16, bf16.
 - Kernel size 2, 3, 4, 5, 6, 7, 8.
+  - **Note**: Kernel sizes 5-8 are only supported with fp16/bf16 inputs due to hardware vectorization constraints. For fp32 inputs, maximum kernel size is 4.
 
 ## How to use
 

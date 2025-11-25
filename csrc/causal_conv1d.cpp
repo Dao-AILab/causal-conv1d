@@ -168,6 +168,12 @@ causal_conv1d_fwd(const at::Tensor &x,
     }
     TORCH_CHECK(width >= 2 && width <= 8, "causal_conv1d only supports width between 2 and 8");
 
+    // Width 5-8 only supported for fp16/bf16 due to kernel vectorization constraints (kNElts)
+    if (width > 4 && input_type == at::ScalarType::Float) {
+        TORCH_CHECK(false, "causal_conv1d: width 5-8 is only supported for float16/bfloat16 inputs, not float32. "
+                    "For float32, maximum width is 4. Please convert your input to fp16/bf16, or use width <= 4.");
+    }
+
     if (bias_.has_value()) {
         auto bias = bias_.value();
         TORCH_CHECK(bias.scalar_type() == weight_type);
@@ -274,6 +280,12 @@ causal_conv1d_bwd(const at::Tensor &x,
     const int width = weight.size(-1);
 
     TORCH_CHECK(width >= 2 && width <= 8, "causal_conv1d only supports width between 2 and 8");
+
+    // Width 5-8 only supported for fp16/bf16 due to kernel vectorization constraints (kNElts)
+    if (width > 4 && input_type == at::ScalarType::Float) {
+        TORCH_CHECK(false, "causal_conv1d: width 5-8 is only supported for float16/bfloat16 inputs, not float32. "
+                    "For float32, maximum width is 4. Please convert your input to fp16/bf16, or use width <= 4.");
+    }
 
     CHECK_SHAPE(x, batch_size, dim, seqlen);
     CHECK_SHAPE(weight, dim, width);
@@ -416,6 +428,12 @@ causal_conv1d_update(const at::Tensor &x,
     CHECK_SHAPE(weight, dim, width);
 
     TORCH_CHECK(width >= 2 && width <= 8, "causal_conv1d only supports width between 2 and 8");
+
+    // Width 5-8 only supported for fp16/bf16 due to kernel vectorization constraints (kNElts)
+    if (width > 4 && input_type == at::ScalarType::Float) {
+        TORCH_CHECK(false, "causal_conv1d: width 5-8 is only supported for float16/bfloat16 inputs, not float32. "
+                    "For float32, maximum width is 4. Please convert your input to fp16/bf16, or use width <= 4.");
+    }
 
     if (bias_.has_value()) {
         auto bias = bias_.value();
