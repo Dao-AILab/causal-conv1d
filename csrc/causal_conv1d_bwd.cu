@@ -281,6 +281,14 @@ void causal_conv1d_bwd_cuda(ConvParamsBwd &params, cudaStream_t stream) {
         causal_conv1d_bwd_launch<128, 3, input_t, weight_t>(params, stream);
     } else if (params.width == 4) {
         causal_conv1d_bwd_launch<128, 4, input_t, weight_t>(params, stream);
+    } else if (params.width == 5) {
+        causal_conv1d_bwd_launch<128, 5, input_t, weight_t>(params, stream);
+    } else if (params.width == 6) {
+        causal_conv1d_bwd_launch<128, 6, input_t, weight_t>(params, stream);
+    } else if (params.width == 7) {
+        causal_conv1d_bwd_launch<128, 7, input_t, weight_t>(params, stream);
+    } else if (params.width == 8) {
+        causal_conv1d_bwd_launch<128, 8, input_t, weight_t>(params, stream);
     }
 }
 
@@ -603,6 +611,14 @@ void causal_conv1d_channellast_bwd_cuda(ConvParamsBwd &params, cudaStream_t stre
         causal_conv1d_channellast_bwd_launch<128, 3, input_t, weight_t>(params, stream);
     } else if (params.width == 4) {
         causal_conv1d_channellast_bwd_launch<128, 4, input_t, weight_t>(params, stream);
+    } else if (params.width == 5) {
+        causal_conv1d_channellast_bwd_launch<128, 5, input_t, weight_t>(params, stream);
+    } else if (params.width == 6) {
+        causal_conv1d_channellast_bwd_launch<128, 6, input_t, weight_t>(params, stream);
+    } else if (params.width == 7) {
+        causal_conv1d_channellast_bwd_launch<128, 7, input_t, weight_t>(params, stream);
+    } else if (params.width == 8) {
+        causal_conv1d_channellast_bwd_launch<128, 8, input_t, weight_t>(params, stream);
     }
 }
 

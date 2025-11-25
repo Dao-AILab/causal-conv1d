@@ -132,6 +132,14 @@ void causal_conv1d_update_cuda(ConvParamsBase &params, cudaStream_t stream) {
         causal_conv1d_update_launch<64, 3, input_t, weight_t>(params, stream);
     } else if (params.width == 4) {
         causal_conv1d_update_launch<64, 4, input_t, weight_t>(params, stream);
+    } else if (params.width == 5) {
+        causal_conv1d_update_launch<64, 5, input_t, weight_t>(params, stream);
+    } else if (params.width == 6) {
+        causal_conv1d_update_launch<64, 6, input_t, weight_t>(params, stream);
+    } else if (params.width == 7) {
+        causal_conv1d_update_launch<64, 7, input_t, weight_t>(params, stream);
+    } else if (params.width == 8) {
+        causal_conv1d_update_launch<64, 8, input_t, weight_t>(params, stream);
     }
 }
 
