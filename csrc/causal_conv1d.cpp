@@ -10,24 +10,21 @@
 #endif
 
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/Context.h>
 #include <torch/python.h>
 #include <vector>
 #include <cstdlib>
-#include <algorithm>
-#include <cctype>
 
 #include "causal_conv1d.h"
 
 namespace {
 bool use_deterministic_mode() {
-    const char* val = std::getenv("CAUSAL_CONV1D_DETERMINISTIC");
-    if (val == nullptr) {
-        val = std::getenv("MAMBA_DETERMINISTIC");
+    const char* env = std::getenv("CAUSAL_CONV1D_DETERMINISTIC");
+    if (env) {
+        if (*env == '1') return true;
+        if (*env == '0') return false;
     }
-    if (val == nullptr) return false;
-    std::string s(val);
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::tolower(c); });
-    return s == "1" || s == "true" || s == "yes";
+    return at::globalContext().deterministicAlgorithms();
 }
 }
 
