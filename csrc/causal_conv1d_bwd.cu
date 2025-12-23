@@ -48,7 +48,7 @@ struct Causal_conv1d_bwd_kernel_traits {
             int(sizeof(typename BlockReduceFloatT::TempStorage))}) + (kIsVecLoad ? 0 : kSmemIOSize);
 };
 
-template<typename Ktraits>
+template<typename Ktraits, bool kDeterministic>
 __global__ __launch_bounds__(Ktraits::kNThreads)
 void causal_conv1d_bwd_kernel(ConvParamsBwd params) {
     constexpr int kWidth = Ktraits::kWidth;
@@ -232,14 +232,26 @@ void causal_conv1d_bwd_kernel(ConvParamsBwd params) {
         __syncthreads();
         dweight_vals[w] = typename Ktraits::BlockReduceFloatT(smem_reduce_float).Sum(dweight_vals[w]);
         if (tidx == 0) {
-            atomicAdd(&reinterpret_cast<float *>(dweight)[w * params.dweight_width_stride], dweight_vals[w]);
+            if constexpr (kDeterministic) {
+                float *dweight_ws = reinterpret_cast<float *>(params.dweight_workspace_ptr);
+                dweight_ws[batch_id * params.dweight_workspace_batch_stride
+                         + dim_id * params.dweight_workspace_dim_stride
+                         + w] = dweight_vals[w];
+            } else {
+                atomicAdd(&reinterpret_cast<float *>(dweight)[w * params.dweight_width_stride], dweight_vals[w]);
+            }
         }
     }
     if (params.bias_ptr != nullptr) {
         __syncthreads();
         dbias_val = typename Ktraits::BlockReduceFloatT(smem_reduce_float).Sum(dbias_val);
         if (tidx == 0) {
-            atomicAdd(&reinterpret_cast<float *>(params.dbias_ptr)[dim_id], dbias_val);
+            if constexpr (kDeterministic) {
+                float *dbias_ws = reinterpret_cast<float *>(params.dbias_workspace_ptr);
+                dbias_ws[batch_id * params.dbias_workspace_batch_stride + dim_id] = dbias_val;
+            } else {
+                atomicAdd(&reinterpret_cast<float *>(params.dbias_ptr)[dim_id], dbias_val);
+            }
         }
     }
 }
@@ -249,26 +261,25 @@ void causal_conv1d_bwd_launch(ConvParamsBwd &params, cudaStream_t stream) {
     static constexpr int kNElts = sizeof(input_t) == 4 ? 4 : 8;
     BOOL_SWITCH(params.seqlen % kNElts == 0, kIsVecLoad, [&] {
         BOOL_SWITCH(params.silu_activation, kSiluAct, [&] {
-            using Ktraits = Causal_conv1d_bwd_kernel_traits<kNThreads, kWidth, kSiluAct, kIsVecLoad, input_t, weight_t>;
-            constexpr int kSmemSize = Ktraits::kSmemSize;
-            dim3 grid(params.batch, params.dim);
-            auto kernel = &causal_conv1d_bwd_kernel<Ktraits>;
-
-            if (kSmemSize >= 48 * 1024) {
-                #ifndef USE_ROCM
-                C10_CUDA_CHECK(cudaFuncSetAttribute(
-                    kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-                #else
-                // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
-                C10_CUDA_CHECK(cudaFuncSetAttribute(
-                    (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-                std::cerr << "Warning (causal_conv1d bwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
-                #endif
-            }
-
-
-            kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            BOOL_SWITCH(params.deterministic, kDeterministic, [&] {
+                using Ktraits = Causal_conv1d_bwd_kernel_traits<kNThreads, kWidth, kSiluAct, kIsVecLoad, input_t, weight_t>;
+                constexpr int kSmemSize = Ktraits::kSmemSize;
+                dim3 grid(params.batch, params.dim);
+                auto kernel = &causal_conv1d_bwd_kernel<Ktraits, kDeterministic>;
+                if (kSmemSize >= 48 * 1024) {
+                    #ifndef USE_ROCM
+                    C10_CUDA_CHECK(cudaFuncSetAttribute(
+                        kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+                    #else
+                    // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
+                    C10_CUDA_CHECK(cudaFuncSetAttribute(
+                        (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+                    std::cerr << "Warning (causal_conv1d bwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
+                    #endif
+                }
+                kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
         });
     });
 }
@@ -318,7 +329,7 @@ struct Causal_conv1d_channellast_bwd_kernel_traits {
     // static constexpr int kSmemSize = kChunkSizeL * kNEltsPerRow * kNBytes;
 };
 
-template<typename Ktraits, bool kHasSeqIdx, bool kHasDfinalStates>
+template<typename Ktraits, bool kHasSeqIdx, bool kHasDfinalStates, bool kDeterministic>
 __global__ __launch_bounds__(Ktraits::kNThreads)
 void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
     constexpr int kWidth = Ktraits::kWidth;
@@ -483,7 +494,15 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
         }
         dweight_vals[w] = Allreduce<kNThreadsPerRow>::run(dweight_vals[w], sum_op);
         if (col_idx == 0 && chunk_c_id * kChunkSizeC + row_idx < params.dim) {
-            atomicAdd(&reinterpret_cast<float *>(dweight)[row_idx * params.dweight_c_stride + w * params.dweight_width_stride], dweight_vals[w]);
+            if constexpr (kDeterministic) {
+                float *dweight_ws = reinterpret_cast<float *>(params.dweight_workspace_ptr);
+                dweight_ws[batch_id * params.dweight_workspace_batch_stride
+                         + chunk_l_id * params.dweight_workspace_dim_stride * params.dim
+                         + (chunk_c_id * kChunkSizeC + row_idx) * params.dweight_workspace_dim_stride
+                         + w] = dweight_vals[w];
+            } else {
+                atomicAdd(&reinterpret_cast<float *>(dweight)[row_idx * params.dweight_c_stride + w * params.dweight_width_stride], dweight_vals[w]);
+            }
         }
     }
 
@@ -492,7 +511,14 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
         for (int i = 0; i < kLPerThread; ++i) { dbias_val += dout_vals[i]; }
         dbias_val = Allreduce<kNThreadsPerRow>::run(dbias_val, sum_op);
         if (col_idx == 0 && chunk_c_id * kChunkSizeC + row_idx < params.dim) {
-            atomicAdd(&reinterpret_cast<float *>(params.dbias_ptr)[chunk_c_id * kChunkSizeC + row_idx], dbias_val);
+            if constexpr (kDeterministic) {
+                float *dbias_ws = reinterpret_cast<float *>(params.dbias_workspace_ptr);
+                dbias_ws[batch_id * params.dbias_workspace_batch_stride
+                       + chunk_l_id * params.dim
+                       + (chunk_c_id * kChunkSizeC + row_idx)] = dbias_val;
+            } else {
+                atomicAdd(&reinterpret_cast<float *>(params.dbias_ptr)[chunk_c_id * kChunkSizeC + row_idx], dbias_val);
+            }
         }
     }
 
@@ -570,25 +596,27 @@ void causal_conv1d_channellast_bwd_launch(ConvParamsBwd &params, cudaStream_t st
     BOOL_SWITCH(params.silu_activation, kSiluAct, [&] {
         BOOL_SWITCH(params.seq_idx_ptr != nullptr, kHasSeqIdx, [&] {
             BOOL_SWITCH(params.dfinal_states_ptr != nullptr, kHasDfinalStates, [&] {
-                BOOL_SWITCH(params.seqlen <= 128, kChunkSizeL64, [&] {
-                    // kChunkSizeL = 128 is slightly faster than 64 when seqlen is larger
-                    static constexpr int kChunk = kChunkSizeL64 ? 64 : 128;
-                    using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, kChunk, kSiluAct, true, input_t, weight_t>;
-                    // constexpr int kSmemSize = Ktraits::kSmemSize;
-                    constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
-                    constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
-                    const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
-                    const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
-                    dim3 grid(params.batch, n_chunks_L, n_chunks_C);
-                    dim3 block(Ktraits::kNThreads);
-                    auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx, kHasDfinalStates>;
-                    // if (kSmemSize >= 48 * 1024) {
-                    //     C10_CUDA_CHECK(cudaFuncSetAttribute(
-                    //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-                    //     }
-                    // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-                    kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+                BOOL_SWITCH(params.deterministic, kDeterministic, [&] {
+                    BOOL_SWITCH(params.seqlen <= 128, kChunkSizeL64, [&] {
+                        // kChunkSizeL = 128 is slightly faster than 64 when seqlen is larger
+                        static constexpr int kChunk = kChunkSizeL64 ? 64 : 128;
+                        using Ktraits = Causal_conv1d_channellast_bwd_kernel_traits<kNThreads, kWidth, kChunk, kSiluAct, true, input_t, weight_t>;
+                        // constexpr int kSmemSize = Ktraits::kSmemSize;
+                        constexpr int kChunkSizeL = Ktraits::kChunkSizeL;
+                        constexpr int kChunkSizeC = Ktraits::kNEltsPerRow;
+                        const int n_chunks_L = (params.seqlen + kChunkSizeL - 1) / kChunkSizeL;
+                        const int n_chunks_C = (params.dim + kChunkSizeC - 1) / kChunkSizeC;
+                        dim3 grid(params.batch, n_chunks_L, n_chunks_C);
+                        dim3 block(Ktraits::kNThreads);
+                        auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx, kHasDfinalStates, kDeterministic>;
+                        // if (kSmemSize >= 48 * 1024) {
+                        //     C10_CUDA_CHECK(cudaFuncSetAttribute(
+                        //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+                        //     }
+                        // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
+                        kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
+                        C10_CUDA_KERNEL_LAUNCH_CHECK();
+                    });
                 });
             });
         });

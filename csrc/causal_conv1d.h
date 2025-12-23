@@ -78,4 +78,11 @@ struct ConvParamsBwd: public ConvParamsBase {
     index_t dfinal_states_batch_stride;
     index_t dfinal_states_l_stride;
     index_t dfinal_states_c_stride;
+
+    bool deterministic;
+    void *__restrict__ dweight_workspace_ptr;
+    void *__restrict__ dbias_workspace_ptr;
+    index_t dweight_workspace_batch_stride;
+    index_t dweight_workspace_dim_stride;
+    index_t dbias_workspace_batch_stride;
 };
