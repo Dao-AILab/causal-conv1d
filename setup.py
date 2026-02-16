@@ -172,8 +172,9 @@ if not SKIP_CUDA_BUILD:
                     f"{PACKAGE_NAME} is only supported on CUDA 11.6 and above.  "
                     "Note: make sure nvcc has a supported version by running nvcc -V."
                 )
-
-        if bare_metal_version <= Version("12.9"):
+        cc_flag.append("-gencode")
+        cc_flag.append("arch=compute_89,code=sm_89")  #选择自己的显卡架构进行编译，减少编译时间和生成文件大小
+        '''  if bare_metal_version <= Version("12.9"):
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_62,code=sm_62")
             cc_flag.append("-gencode")
@@ -200,7 +201,7 @@ if not SKIP_CUDA_BUILD:
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_110,code=sm_110")
             cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_121,code=sm_121")
+            cc_flag.append("arch=compute_121,code=sm_121")'''
 
     # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
     # torch._C._GLIBCXX_USE_CXX11_ABI

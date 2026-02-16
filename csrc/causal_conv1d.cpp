@@ -3,12 +3,12 @@
  ******************************************************************************/
 
 #include <torch/extension.h>
-#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
+//#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
 #include <c10/core/DeviceGuard.h>
-#else
+/*#else
 #include <c10/cuda/CUDAGuard.h>
-#endif
-
+#endif*/
+#include <ciso646> //支持在C++中使用and/or/not等逻辑运算符的头文件
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/Context.h>
 #include <torch/python.h>
@@ -240,11 +240,11 @@ causal_conv1d_fwd(const at::Tensor &x,
     }
 
     // Otherwise the kernel will be launched from cuda:0 device
-#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
+//#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
     c10::DeviceGuard device_guard(x.device());
-#else
-    at::cuda::CUDAGuard device_guard{x.device()};
-#endif
+//#else
+//    at::cuda::CUDAGuard device_guard{x.device()};
+//#endif
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_fwd", [&] {
         DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_fwd", [&] {
@@ -327,12 +327,12 @@ causal_conv1d_bwd(const at::Tensor &x,
     if (is_channel_last) { TORCH_CHECK(dx.stride(1) == 1); }
 
     // Otherwise the kernel will be launched from cuda:0 device
-#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
+//#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
     c10::Device device = x.device();
     c10::DeviceGuard device_guard(device);
-#else
-    at::cuda::CUDAGuard device_guard{x.device()};
-#endif
+//#else
+//    at::cuda::CUDAGuard device_guard{x.device()};
+//#endif
     ConvParamsBwd params;
     set_conv_params_bwd(params, batch_size, dim, seqlen, width,
                         x, weight, bias_.has_value() ? bias_.value().data_ptr() : nullptr,
@@ -542,12 +542,12 @@ causal_conv1d_update(const at::Tensor &x,
     }
 
     // Otherwise the kernel will be launched from cuda:0 device
-#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
+//#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
     c10::Device device = x.device();
     c10::DeviceGuard device_guard(device);
-#else
-    at::cuda::CUDAGuard device_guard{x.device()};
-#endif
+//#else
+///    at::cuda::CUDAGuard device_guard{x.device()};
+//#endif
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     DISPATCH_ITYPE_FLOAT_AND_HALF_AND_BF16(x.scalar_type(), "causal_conv1d_update", [&] {
         DISPATCH_WTYPE_FLOAT_AND_HALF_AND_BF16(weight.scalar_type(), "causal_conv1d_update", [&] {
