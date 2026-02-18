@@ -30,8 +30,15 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     name: Build wheel (${{ inputs.container-image }})
     steps:
-      - name: Move /var/lib/docker/
-        run: sudo mv /var/lib/docker/ "${GITHUB_WORKSPACE}/docker"
+      - name: Move /var/lib/containerd/
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/docker/containerd"
+          sudo mv /var/lib/containerd/ "${GITHUB_WORKSPACE}/docker/containerd"
+
+      - name: Move /var/lib/containerd/
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/docker/docker"
+          sudo mv /var/lib/docker/ "${GITHUB_WORKSPACE}/docker/docker"
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -43,10 +50,13 @@ jobs:
           remove-android: "true"
           remove-haskell: "true"
           remove-codeql: "true"
-          build-mount-path: "/var/lib/docker/"
+          build-mount-path: "/var/lib/"
+
+      - name: Restore /var/lib/containerd/
+        run: sudo sh -c "mv ${GITHUB_WORKSPACE}/docker/containerd/* /var/lib/containerd"
 
       - name: Restore /var/lib/docker/
-        run: sudo sh -c "mv ${GITHUB_WORKSPACE}/docker/* /var/lib/docker"
+        run: sudo sh -c "mv ${GITHUB_WORKSPACE}/docker/docker/* /var/lib/docker"
 
       - name: Checkout source
         uses: actions/checkout@v4
