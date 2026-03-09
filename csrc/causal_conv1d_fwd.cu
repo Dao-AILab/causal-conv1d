@@ -9,9 +9,11 @@
 #ifndef USE_ROCM
     #include <cub/block/block_load.cuh>
     #include <cub/block/block_store.cuh>
+    #define ROCM_ONLY(x) 
 #else
     #include <hipcub/hipcub.hpp>
     namespace cub = hipcub;
+    #define ROCM_ONLY(x) x
 #endif
 
 #include "causal_conv1d.h"
@@ -145,15 +147,10 @@ void causal_conv1d_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
         auto kernel = &causal_conv1d_fwd_kernel<Ktraits>;
 
         if (kSmemSize >= 48 * 1024) {
-            #ifndef USE_ROCM
-            C10_CUDA_CHECK(cudaFuncSetAttribute(
-                kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            #else
             // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
             C10_CUDA_CHECK(cudaFuncSetAttribute(
-                (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
-            #endif
+                ROCM_ONLY((void *)) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
+            ROCM_ONLY(std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl);
         }
         kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
 
