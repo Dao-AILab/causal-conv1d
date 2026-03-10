@@ -65,6 +65,15 @@ jobs:
             cuda-version: "13.0.1"
           - torch-version: "2.8.0"
             cuda-version: "13.0.1"
+          # PyTorch 2.7+ pip wheels use CXX11_ABI=1 by default, no need for FALSE
+          - torch-version: "2.7.1"
+            cxx11_abi: "FALSE"
+          - torch-version: "2.8.0"
+            cxx11_abi: "FALSE"
+          - torch-version: "2.9.1"
+            cxx11_abi: "FALSE"
+          - torch-version: "2.10.0"
+            cxx11_abi: "FALSE"
 
     uses: ./.github/workflows/_build.yml
     with:
