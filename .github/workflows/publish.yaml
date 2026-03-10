@@ -44,12 +44,27 @@ jobs:
         os: [ubuntu-22.04, ubuntu-22.04-arm]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         torch-version: ["2.6.0", "2.7.1", "2.8.0", "2.9.1", "2.10.0"]
-        cuda-version: ["11.8.0", "12.9.1"]
+        cuda-version: ["11.8.0", "12.9.1", "13.0.1"]
         # We need separate wheels that either uses C++11 ABI (-D_GLIBCXX_USE_CXX11_ABI) or not.
         # Pytorch wheels currently don't use it, but nvcr images have Pytorch compiled with C++11 ABI.
         # Without this we get import error (undefined symbol: _ZN3c105ErrorC2ENS_14SourceLocationESs)
         # when building without C++11 ABI and using it on nvcr images.
         cxx11_abi: ["FALSE", "TRUE"]
+        exclude:
+          # CUDA 11.8 is not supported by PyTorch 2.8+
+          - torch-version: "2.8.0"
+            cuda-version: "11.8.0"
+          - torch-version: "2.9.1"
+            cuda-version: "11.8.0"
+          - torch-version: "2.10.0"
+            cuda-version: "11.8.0"
+          # CUDA 13.0 is only supported by PyTorch 2.9+
+          - torch-version: "2.6.0"
+            cuda-version: "13.0.1"
+          - torch-version: "2.7.1"
+            cuda-version: "13.0.1"
+          - torch-version: "2.8.0"
+            cuda-version: "13.0.1"
 
     uses: ./.github/workflows/_build.yml
     with:
