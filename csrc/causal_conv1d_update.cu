@@ -2,10 +2,10 @@
  * Copyright (c) 2023, Tri Dao.
  ******************************************************************************/
 
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/cuda/CUDAException.h>  // For C10_CUDA_CHECK and C10_CUDA_KERNEL_LAUNCH_CHECK
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
 
+#include "causal_conv1d_cuda_compat.h"  // For CAUSAL_CONV1D_CUDA_CHECK and CAUSAL_CONV1D_CUDA_KERNEL_LAUNCH_CHECK
 #include "causal_conv1d.h"
 #include "causal_conv1d_common.h"
 #include "static_switch.h"
@@ -121,7 +121,7 @@ void causal_conv1d_update_launch(ConvParamsBase &params, cudaStream_t stream) {
         ? &causal_conv1d_update_kernel<Ktraits, false>
         : &causal_conv1d_update_kernel<Ktraits, true>;
     kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    CAUSAL_CONV1D_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename input_t, typename weight_t>
@@ -136,11 +136,11 @@ void causal_conv1d_update_cuda(ConvParamsBase &params, cudaStream_t stream) {
 }
 
 template void causal_conv1d_update_cuda<float, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<at::Half, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<at::BFloat16, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<float, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<at::Half, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<at::BFloat16, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<float, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<at::Half, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_update_cuda<at::BFloat16, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<torch::headeronly::Half, float>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<torch::headeronly::BFloat16, float>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<float, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<torch::headeronly::Half, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<torch::headeronly::BFloat16, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<float, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<torch::headeronly::Half, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_update_cuda<torch::headeronly::BFloat16, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);

@@ -24,6 +24,7 @@ from torch.utils.cpp_extension import (
     CUDAExtension,
     CUDA_HOME,
     HIP_HOME,
+    min_supported_cpython,
 )
 
 
@@ -35,6 +36,9 @@ with open("README.md", "r", encoding="utf-8") as fh:
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
 PACKAGE_NAME = "causal_conv1d"
+TORCH_TARGET_VERSION = "0x020a000000000000"
+PY_LIMITED_API_TAG = f"cp{(int(min_supported_cpython, 16) >> 24) & 0xFF}{(int(min_supported_cpython, 16) >> 16) & 0xFF}"
+PYTHON_REQUIRES_TAG = f">={(int(min_supported_cpython, 16) >> 24) & 0xFF}.{(int(min_supported_cpython, 16) >> 16) & 0xFF}"
 
 BASE_WHEEL_URL = "https://github.com/Dao-AILab/causal-conv1d/releases/download/{tag_name}/{wheel_name}"
 
@@ -203,10 +207,11 @@ if not SKIP_CUDA_BUILD:
 
     if HIP_BUILD:
         extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17"],
+            "cxx": ["-O3", "-std=c++17", f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}"],
             "nvcc": [
                 "-O3",
                 "-std=c++17",
+                f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
                 f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
                 "-U__CUDA_NO_HALF_OPERATORS__",
                 "-U__CUDA_NO_HALF_CONVERSIONS__",
@@ -216,10 +221,12 @@ if not SKIP_CUDA_BUILD:
         }
     else:
         extra_compile_args = {
-            "cxx": ["-O3"],
+            "cxx": ["-O3", "-std=c++17", f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}"],
             "nvcc": append_nvcc_threads(
                 [
                     "-O3",
+                    "-std=c++17",
+                    f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
                     "-U__CUDA_NO_HALF_OPERATORS__",
                     "-U__CUDA_NO_HALF_CONVERSIONS__",
                     "-U__CUDA_NO_BFLOAT16_OPERATORS__",
@@ -247,6 +254,7 @@ if not SKIP_CUDA_BUILD:
             ],
             extra_compile_args=extra_compile_args,
             include_dirs=[Path(this_dir) / "csrc"],
+            py_limited_api=True,
         )
     )
 
@@ -376,10 +384,11 @@ setup(
     else {
         "bdist_wheel": CachedWheelsCommand,
     },
-    python_requires=">=3.9",
+    python_requires=PYTHON_REQUIRES_TAG,
     install_requires=[
         "torch",
         "packaging",
         "ninja",
     ],
+    options={"bdist_wheel": {"py_limited_api": PY_LIMITED_API_TAG}},
 )
