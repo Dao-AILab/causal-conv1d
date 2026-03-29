@@ -221,11 +221,12 @@ if not SKIP_CUDA_BUILD:
         }
     else:
         extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17", f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}"],
+            "cxx": ["-O3", "-std=c++17", "-DUSE_CUDA", f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}"],
             "nvcc": append_nvcc_threads(
                 [
                     "-O3",
                     "-std=c++17",
+                    "-DUSE_CUDA",
                     f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
                     "-U__CUDA_NO_HALF_OPERATORS__",
                     "-U__CUDA_NO_HALF_CONVERSIONS__",
@@ -236,7 +237,10 @@ if not SKIP_CUDA_BUILD:
                     "--expt-relaxed-constexpr",
                     "--expt-extended-lambda",
                     "--use_fast_math",
-                    "--ptxas-options=-v",
+                    "-diag-suppress=174",
+                    "-diag-suppress=177",
+                    "-diag-suppress=221",
+                    # "--ptxas-options=-v",
                     "-lineinfo",
                 ]
                 + cc_flag
