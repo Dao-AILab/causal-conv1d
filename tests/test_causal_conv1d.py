@@ -9,6 +9,7 @@ import pytest
 
 from einops import rearrange
 
+import causal_conv1d.cpp_functions as causal_conv1d_cpp_functions
 from causal_conv1d.causal_conv1d_interface import causal_conv1d_fn, causal_conv1d_ref
 from causal_conv1d.causal_conv1d_interface import causal_conv1d_update, causal_conv1d_update_ref
 from causal_conv1d.causal_conv1d_varlen import causal_conv1d_varlen_states, causal_conv1d_varlen_states_ref
@@ -18,33 +19,32 @@ def _max_abs_diff(a: torch.Tensor, b: torch.Tensor) -> float:
     return (a.float() - b.float()).abs().max().item()
 
 
-def _conv1d_bwd_once(*, seed: int, channel_last: bool):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    device = "cuda"
-    itype = torch.bfloat16
-    dim = 1024
-    seqlen = 2048
-    width = 4
+def _conv1d_bwd_once(*, seed: int, channel_last: bool, deterministic: bool):
+    old = causal_conv1d_cpp_functions.DETERMINISTIC
+    causal_conv1d_cpp_functions.DETERMINISTIC = deterministic
+    try:
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        device = "cuda"
+        itype = torch.bfloat16
+        dim = 1024
+        seqlen = 2048
+        width = 4
 
-    batch = 4
-    if not channel_last:
-        x = torch.randn(batch, dim, seqlen, device=device, dtype=itype).requires_grad_()
-    else:
-        x = torch.randn(batch, seqlen, dim, device=device, dtype=itype).transpose(1, 2).requires_grad_()
-    weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
-    bias = torch.randn(dim, device=device, dtype=torch.float32, requires_grad=True)
-    g = torch.randn_like(x)
-    out = causal_conv1d_fn(x, weight, bias, activation="silu")
-    out.backward(g)
-    torch.cuda.synchronize()
-    return x.grad.detach().clone(), weight.grad.detach().clone(), bias.grad.detach().clone()
-
-
-def _set_torch_deterministic(enabled: bool) -> bool:
-    old = torch.are_deterministic_algorithms_enabled()
-    torch.use_deterministic_algorithms(enabled)
-    return old
+        batch = 4
+        if not channel_last:
+            x = torch.randn(batch, dim, seqlen, device=device, dtype=itype).requires_grad_()
+        else:
+            x = torch.randn(batch, seqlen, dim, device=device, dtype=itype).transpose(1, 2).requires_grad_()
+        weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
+        bias = torch.randn(dim, device=device, dtype=torch.float32, requires_grad=True)
+        g = torch.randn_like(x)
+        out = causal_conv1d_fn(x, weight, bias, activation="silu")
+        out.backward(g)
+        torch.cuda.synchronize()
+        return x.grad.detach().clone(), weight.grad.detach().clone(), bias.grad.detach().clone()
+    finally:
+        causal_conv1d_cpp_functions.DETERMINISTIC = old
 
 
 @pytest.mark.parametrize("return_final_states", [False, True])
@@ -559,60 +559,44 @@ def test_causal_conv1d_varlen_padding(dim, seqlen, width, has_bias, silu_activat
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 @pytest.mark.parametrize("channel_last", [False, True])
-def test_causal_conv1d_bwd_deterministic_reproducible(channel_last: bool, monkeypatch):
-    monkeypatch.delenv("CAUSAL_CONV1D_DETERMINISTIC", raising=False)
-    old = _set_torch_deterministic(True)
-    try:
-        runs = 5
-        outs = [_conv1d_bwd_once(seed=123, channel_last=channel_last) for _ in range(runs)]
-        dx0, dw0, db0 = outs[0]
-        for i in range(1, runs):
-            dx, dw, db = outs[i]
-            assert _max_abs_diff(dx0, dx) == 0.0
-            assert _max_abs_diff(dw0, dw) == 0.0
-            assert _max_abs_diff(db0, db) == 0.0
-    finally:
-        torch.use_deterministic_algorithms(old)
+def test_causal_conv1d_bwd_deterministic_reproducible(channel_last: bool):
+    runs = 5
+    outs = [_conv1d_bwd_once(seed=123, channel_last=channel_last, deterministic=True) for _ in range(runs)]
+    dx0, dw0, db0 = outs[0]
+    for i in range(1, runs):
+        dx, dw, db = outs[i]
+        assert _max_abs_diff(dx0, dx) == 0.0
+        assert _max_abs_diff(dw0, dw) == 0.0
+        assert _max_abs_diff(db0, db) == 0.0
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 @pytest.mark.parametrize("channel_last", [False, True])
-def test_causal_conv1d_bwd_deterministic_close_to_default(channel_last: bool, monkeypatch):
+def test_causal_conv1d_bwd_deterministic_close_to_default(channel_last: bool):
     default_runs = 3
-    monkeypatch.delenv("CAUSAL_CONV1D_DETERMINISTIC", raising=False)
-    old = _set_torch_deterministic(True)
-    try:
-        dx_det, dw_det, db_det = _conv1d_bwd_once(seed=123, channel_last=channel_last)
-        torch.use_deterministic_algorithms(False)
-        for _ in range(default_runs):
-            dx_def, dw_def, db_def = _conv1d_bwd_once(seed=123, channel_last=channel_last)
-            assert torch.allclose(dx_det, dx_def, rtol=1e-2, atol=5e-2)
-            assert torch.allclose(dw_det, dw_def, rtol=1e-3, atol=1e-3)
-            assert torch.allclose(db_det, db_def, rtol=1e-3, atol=1e-3)
-    finally:
-        torch.use_deterministic_algorithms(old)
+    dx_det, dw_det, db_det = _conv1d_bwd_once(seed=123, channel_last=channel_last, deterministic=True)
+    for _ in range(default_runs):
+        dx_def, dw_def, db_def = _conv1d_bwd_once(seed=123, channel_last=channel_last, deterministic=False)
+        assert torch.allclose(dx_det, dx_def, rtol=1e-2, atol=5e-2)
+        assert torch.allclose(dw_det, dw_def, rtol=1e-3, atol=1e-3)
+        assert torch.allclose(db_det, db_def, rtol=1e-3, atol=1e-3)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 @pytest.mark.parametrize("channel_last", [False, True])
-def test_causal_conv1d_bwd_default_mode_is_not_reproducible(channel_last: bool, monkeypatch):
-    monkeypatch.delenv("CAUSAL_CONV1D_DETERMINISTIC", raising=False)
-    old = _set_torch_deterministic(False)
-    try:
-        runs = 20
-        dw0 = None
-        db0 = None
-        dx0 = None
-        observed = False
-        for _ in range(runs):
-            dx, dw, db = _conv1d_bwd_once(seed=123, channel_last=channel_last)
-            if dw0 is None:
-                dx0, dw0, db0 = dx, dw, db
-                continue
-            if _max_abs_diff(dx0, dx) != 0.0 or _max_abs_diff(dw0, dw) != 0.0 or _max_abs_diff(db0, db) != 0.0:
-                observed = True
-                break
-        if not observed:
-            pytest.xfail("Did not observe nondeterminism in default mode (may be GPU/runtime dependent).")
-    finally:
-        torch.use_deterministic_algorithms(old)
+def test_causal_conv1d_bwd_default_mode_is_not_reproducible(channel_last: bool):
+    runs = 20
+    dw0 = None
+    db0 = None
+    dx0 = None
+    observed = False
+    for _ in range(runs):
+        dx, dw, db = _conv1d_bwd_once(seed=123, channel_last=channel_last, deterministic=False)
+        if dw0 is None:
+            dx0, dw0, db0 = dx, dw, db
+            continue
+        if _max_abs_diff(dx0, dx) != 0.0 or _max_abs_diff(dw0, dw) != 0.0 or _max_abs_diff(db0, db) != 0.0:
+            observed = True
+            break
+    if not observed:
+        pytest.xfail("Did not observe nondeterminism in default mode (may be GPU/runtime dependent).")

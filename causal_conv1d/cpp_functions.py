@@ -1,11 +1,21 @@
 # Copyright (c) 2024, Tri Dao.
 
+import os
+
 import torch
 
 import causal_conv1d_cuda
 
 
 LIBRARY_NAME = "DaoAILab"
+
+DETERMINISTIC = os.getenv("CAUSAL_CONV1D_DETERMINISTIC")
+if DETERMINISTIC == "1":
+    DETERMINISTIC = True
+elif DETERMINISTIC == "0":
+    DETERMINISTIC = False
+else:
+    DETERMINISTIC = torch.are_deterministic_algorithms_enabled()
 
 
 @torch.library.custom_op(f"{LIBRARY_NAME}::_causal_conv1d_fwd_cpp", mutates_args={"out", "final_states_out"})
@@ -19,7 +29,7 @@ def _causal_conv1d_fwd_cpp(
     final_states_out: torch.Tensor | None,
     silu_activation: bool,
 ) -> None:
-    causal_conv1d_cuda.causal_conv1d_fwd(
+    torch.ops.causal_conv1d_cuda.causal_conv1d_fwd(
         x,
         weight,
         bias,
@@ -52,7 +62,7 @@ def _causal_conv1d_bwd_cpp(
     dinitial_states: torch.Tensor,
     silu_activation: bool,
 ) -> None:
-    causal_conv1d_cuda.causal_conv1d_bwd(
+    torch.ops.causal_conv1d_cuda.causal_conv1d_bwd(
         x,
         weight,
         bias,
@@ -65,6 +75,7 @@ def _causal_conv1d_bwd_cpp(
         dbias,
         dinitial_states,
         silu_activation,
+        DETERMINISTIC,
     )
 
 
@@ -79,7 +90,7 @@ def _causal_conv1d_update_cpp(
     cache_seqlens: torch.Tensor | None,
     conv_state_indices: torch.Tensor | None,
 ) -> None:
-    causal_conv1d_cuda.causal_conv1d_update(
+    torch.ops.causal_conv1d_cuda.causal_conv1d_update(
         x,
         conv_state,
         weight,

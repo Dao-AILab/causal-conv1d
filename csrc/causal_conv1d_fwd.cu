@@ -2,9 +2,8 @@
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
 
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/cuda/CUDAException.h>  // For C10_CUDA_CHECK and C10_CUDA_KERNEL_LAUNCH_CHECK
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
 
 #ifndef USE_ROCM
     #include <cub/block/block_load.cuh>
@@ -16,6 +15,7 @@
     #define ROCM_ONLY(x) x
 #endif
 
+#include "causal_conv1d_cuda_compat.h"  // For CAUSAL_CONV1D_CUDA_CHECK and CAUSAL_CONV1D_CUDA_KERNEL_LAUNCH_CHECK
 #include "causal_conv1d.h"
 #include "causal_conv1d_common.h"
 #include "static_switch.h"
@@ -148,13 +148,13 @@ void causal_conv1d_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
 
         if (kSmemSize >= 48 * 1024) {
             // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
-            C10_CUDA_CHECK(cudaFuncSetAttribute(
+            CAUSAL_CONV1D_CUDA_CHECK(cudaFuncSetAttribute(
                 ROCM_ONLY((void *)) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
             ROCM_ONLY(std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl);
         }
         kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
 
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        CAUSAL_CONV1D_CUDA_KERNEL_LAUNCH_CHECK();
     });
 }
 
@@ -365,7 +365,7 @@ void causal_conv1d_channellast_fwd_launch(ConvParamsBase &params, cudaStream_t s
         //     }
         // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
         kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        CAUSAL_CONV1D_CUDA_KERNEL_LAUNCH_CHECK();
     });
 }
 
@@ -381,21 +381,21 @@ void causal_conv1d_channellast_fwd_cuda(ConvParamsBase &params, cudaStream_t str
 }
 
 template void causal_conv1d_fwd_cuda<float, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<at::Half, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<at::BFloat16, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<float, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<at::Half, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<at::BFloat16, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<float, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<at::Half, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_fwd_cuda<at::BFloat16, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<torch::headeronly::Half, float>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<torch::headeronly::BFloat16, float>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<float, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<torch::headeronly::Half, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<torch::headeronly::BFloat16, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<float, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<torch::headeronly::Half, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_fwd_cuda<torch::headeronly::BFloat16, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
 
 template void causal_conv1d_channellast_fwd_cuda<float, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<at::Half, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<at::BFloat16, float>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<float, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<at::Half, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<at::BFloat16, at::Half>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<float, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<at::Half, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
-template void causal_conv1d_channellast_fwd_cuda<at::BFloat16, at::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<torch::headeronly::Half, float>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<torch::headeronly::BFloat16, float>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<float, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<torch::headeronly::Half, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<torch::headeronly::BFloat16, torch::headeronly::Half>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<float, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<torch::headeronly::Half, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
+template void causal_conv1d_channellast_fwd_cuda<torch::headeronly::BFloat16, torch::headeronly::BFloat16>(ConvParamsBase &params, cudaStream_t stream);
