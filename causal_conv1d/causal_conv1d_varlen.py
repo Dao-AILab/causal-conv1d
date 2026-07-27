@@ -17,16 +17,24 @@ def _causal_conv1d_varlen_states(
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr
 ):
-    batch_idx = tl.program_id(2)
+    # Pointer offsets must be computed in int64. `rows * stride_x_seqlen` reaches
+    # total_tokens * stride_x_seqlen, and X is typically a view into a wider fused
+    # projection buffer (so stride_x_seqlen is that buffer's row width, not `dim`),
+    # which overflows int32 long before the tensor itself is unreasonable. Triton
+    # defaults program ids, tl.arange and int32 loads to int32, so widening must be
+    # explicit; `rows`/`cols` then propagate int64 through the address arithmetic.
+    batch_idx = tl.program_id(2).to(tl.int64)
+    pid_m = tl.program_id(1).to(tl.int64)
+    pid_n = tl.program_id(0).to(tl.int64)
     STATES += batch_idx * stride_states_batch
-    end_idx = tl.load(CU_SEQLENS + batch_idx + 1)
-    start_idx = tl.maximum(tl.load(CU_SEQLENS + batch_idx), end_idx - state_len)
-    rows = end_idx - (tl.program_id(1) + 1) * BLOCK_M + tl.arange(0, BLOCK_M)
-    cols = tl.program_id(0) * BLOCK_N + tl.arange(0, BLOCK_N)
+    end_idx = tl.load(CU_SEQLENS + batch_idx + 1).to(tl.int64)
+    start_idx = tl.maximum(tl.load(CU_SEQLENS + batch_idx).to(tl.int64), end_idx - state_len)
+    rows = end_idx - (pid_m + 1) * BLOCK_M + tl.arange(0, BLOCK_M)
+    cols = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     x = tl.load(X + rows[:, None] * stride_x_seqlen + cols[None, :] * stride_x_dim,
                 mask=(rows[:, None] >= start_idx) & (cols[None, :] < dim),
                 other=0)
-    rows_states = state_len - (tl.program_id(1) + 1) * BLOCK_M + tl.arange(0, BLOCK_M)
+    rows_states = state_len - (pid_m + 1) * BLOCK_M + tl.arange(0, BLOCK_M)
     tl.store(STATES + rows_states[:, None] * stride_states_seqlen + cols[None, :] * stride_states_dim,
              x,
              mask=(rows_states[:, None] >= 0) & (cols[None, :] < dim))
