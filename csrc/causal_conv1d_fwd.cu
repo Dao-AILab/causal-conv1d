@@ -232,8 +232,9 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
         + chunk_c_id * kChunkSizeC * params.weight_c_stride;
     input_t *out = reinterpret_cast<input_t *>(params.out_ptr) + batch_id * params.out_batch_stride
         + (chunk_l_id * kChunkSizeL + l_idx) * params.out_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
+    // batch_id and params.seqlen are both int, so widen before multiplying.
     int *seq_idx = !kHasSeqIdx ? nullptr : reinterpret_cast<int *>(params.seq_idx_ptr)
-        + batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
+        + static_cast<int64_t>(batch_id) * params.seqlen + chunk_l_id * kChunkSizeL;
     input_t *initial_states = params.initial_states_ptr == nullptr || chunk_l_id > 0 ? nullptr
         : reinterpret_cast<input_t *>(params.initial_states_ptr) + batch_id * params.initial_states_batch_stride + l_idx * params.initial_states_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
     // The last L-chunk will also have enough info to write to final states, since it also contain a few x values

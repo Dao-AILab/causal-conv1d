@@ -4,10 +4,19 @@
 
 #pragma once
 
+#include <cstdint>
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct ConvParamsBase {
-    using index_t = uint32_t;
+    // Element offsets are accumulated in this type. It must be wide enough to hold
+    // the largest flat offset any kernel touches, which for a tensor that is a view
+    // into a larger buffer (e.g. the xBC slice of mamba2's fused in_proj output) is
+    // roughly batch * seqlen * <the parent buffer's row width>, not the size of the
+    // view itself. A 32-bit type wraps at 2^32 elements; because the wrapped offset
+    // still lands inside the same allocation, that corrupts results silently instead
+    // of faulting, so it must stay 64-bit.
+    using index_t = int64_t;
 
     int batch, dim, seqlen, width;
     bool silu_activation;
