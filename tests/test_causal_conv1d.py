@@ -407,7 +407,7 @@ def test_causal_conv1d_race_condition(seqlen, width, has_bias, silu_activation, 
 @pytest.mark.parametrize("width", [2, 3, 4])
 # @pytest.mark.parametrize('width', [2])
 @pytest.mark.parametrize(
-    "seqlen", [8, 16, 32, 64, 128, 151, 256, 372, 512, 784, 1024, 1134, 2048, 4096]
+    "seqlen", [8, 16, 32, 63, 64, 65, 127, 128, 129, 151, 256, 257, 372, 512, 784, 1024, 1134, 2048, 4096]
 )
 # @pytest.mark.parametrize('seqlen', [8, 16, 32, 64, 128, 256, 512, 784, 1024, 2048, 4096])
 # @pytest.mark.parametrize('seqlen', [2048])
