@@ -448,10 +448,13 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
 
     int seq_idx_thread[kWidth - 1 + kLPerThread + kWidth - 1];
     if constexpr (kHasSeqIdx) {
+        const int initial_state_seq_idx = initial_states == nullptr ? -1 : seq_idx[0];
         #pragma unroll
         for (int i = 0; i < kWidth - 1 + kLPerThread + kWidth - 1; ++i) {
             const int l_idx = chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i - (kWidth - 1);
-            seq_idx_thread[i] = l_idx >= 0 && l_idx < params.seqlen ? seq_idx[col_idx * kLPerThread + i - (kWidth - 1)] : -1;
+            seq_idx_thread[i] = l_idx >= 0 && l_idx < params.seqlen
+                ? seq_idx[col_idx * kLPerThread + i - (kWidth - 1)]
+                : l_idx < 0 ? initial_state_seq_idx : -1;
         }
     }
 
@@ -548,7 +551,15 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
         for (int i = 0; i < kWidth - 1; ++i) {
             #pragma unroll
             for (int w = 0; w < kWidth; ++w) {
-                dxinit_vals[i] += i + w - (kWidth - 1) >= 0 ? weight_vals[kWidth - 1 - w] * dout_vals[i + w - (kWidth - 1)] : 0.f;
+                if (i + w - (kWidth - 1) >= 0) {
+                    if constexpr (!kHasSeqIdx) {
+                        dxinit_vals[i] += weight_vals[kWidth - 1 - w] * dout_vals[i + w - (kWidth - 1)];
+                    } else {
+                        dxinit_vals[i] += seq_idx_thread[i] == seq_idx_thread[i + w]
+                            ? weight_vals[kWidth - 1 - w] * dout_vals[i + w - (kWidth - 1)]
+                            : 0.f;
+                    }
+                }
             }
             // chunk_l_id must be 0 because dinitial_states != nullptr
             // if (dfinal_states != nullptr) {
