@@ -303,9 +303,13 @@ void causal_conv1d_channellast_fwd_kernel(ConvParamsBase params) {
     }
     int seq_idx_thread[kWidth - 1 + kLPerThread];
     if constexpr (kHasSeqIdx) {
+        const int initial_state_seq_idx = initial_states == nullptr ? -1 : seq_idx[0];
         #pragma unroll
         for (int i = 0; i < kWidth - 1 + kLPerThread; ++i) {
-            seq_idx_thread[i] = chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i - (kWidth - 1) >= 0 ? seq_idx[col_idx * kLPerThread + i - (kWidth - 1)] : -1;
+            const int l_idx = chunk_l_id * kChunkSizeL + col_idx * kLPerThread + i - (kWidth - 1);
+            seq_idx_thread[i] = l_idx >= 0 && l_idx < params.seqlen
+                ? seq_idx[col_idx * kLPerThread + i - (kWidth - 1)]
+                : l_idx < 0 ? initial_state_seq_idx : -1;
         }
     }
 
