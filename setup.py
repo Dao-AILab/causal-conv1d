@@ -265,8 +265,10 @@ def get_package_version():
         return str(public_version)
 
 
-def get_wheel_url():
+def get_wheel_url(causal_conv1d_version=None):
     # Determine the version numbers that will be used to determine the correct wheel
+    # causal_conv1d_version defaults to the package version, but callers can pass a
+    # post release like "1.6.1.post4" to probe for wheels published under it.
     torch_version_raw = parse(torch.__version__)
 
     if HIP_BUILD:
@@ -294,7 +296,8 @@ def get_wheel_url():
 
     python_version = f"cp{sys.version_info.major}{sys.version_info.minor}"
     platform_name = get_platform()
-    causal_conv1d_version = get_package_version()
+    if causal_conv1d_version is None:
+        causal_conv1d_version = get_package_version()
 
     if os.environ.get("NVIDIA_PRODUCT_NAME", "") == "PyTorch":
         torch_version = str(os.environ.get("NVIDIA_PYTORCH_VERSION"))
@@ -312,6 +315,44 @@ def get_wheel_url():
     return wheel_url, wheel_filename
 
 
+def _remote_wheel_exists(url):
+    # HEAD probe so we can check a candidate wheel without downloading it.
+    # Only a definitive 404 means "missing"; any other error is treated as
+    # "maybe present" so we still fall through to the normal download attempt
+    # rather than silently building from source.
+    request = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=10):
+            return True
+    except urllib.error.HTTPError as e:
+        return e.code != 404
+    except urllib.error.URLError:
+        return False
+
+
+def resolve_wheel_url(max_post=20):
+    # The PyPI sdist is published under the base public version like 1.6.1, but
+    # the matching release wheels are often uploaded under a post release like
+    # v1.6.1.post4. Probe .postN in order and use the highest that exists,
+    # falling back to the base version's URL. See issue #104.
+    base_version = get_package_version()
+    best_url, best_filename = get_wheel_url(base_version)
+    misses = 0
+    for n in range(1, max_post + 1):
+        post_version = f"{base_version}.post{n}"
+        url, filename = get_wheel_url(post_version)
+        if _remote_wheel_exists(url):
+            best_url, best_filename = url, filename
+            misses = 0
+        else:
+            # Post numbers are contiguous in practice; stop after a couple of
+            # consecutive gaps instead of probing all the way to max_post.
+            misses += 1
+            if misses >= 2:
+                break
+    return best_url, best_filename
+
+
 class CachedWheelsCommand(_bdist_wheel):
     """
     The CachedWheelsCommand plugs into the default bdist wheel, which is ran by pip when it cannot
@@ -324,7 +365,7 @@ class CachedWheelsCommand(_bdist_wheel):
         if FORCE_BUILD:
             return super().run()
 
-        wheel_url, wheel_filename = get_wheel_url()
+        wheel_url, wheel_filename = resolve_wheel_url()
         print("Guessing wheel URL: ", wheel_url)
         try:
             urllib.request.urlretrieve(wheel_url, wheel_filename)
