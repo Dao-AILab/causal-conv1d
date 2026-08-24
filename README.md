@@ -29,11 +29,26 @@ import torch.nn.functional as F
 F.conv1d(x, weight.unsqueeze(1), bias, padding=width - 1, groups=dim)[..., :seqlen]
 ```
 
-## Additional Prerequisites for AMD cards
+## AMD ROCm/HIP support
 
-### Patching ROCm
+causal-conv1d supports AMD GPUs via ROCm/HIP (ROCm 6.1+).
 
-If you are on ROCm 6.0, run the following steps to avoid errors during compilation. This is not required for ROCm 6.1 onwards.
+### Building from source
+
+```bash
+# Set your GPU architecture
+export HIP_ARCHITECTURES=gfx1201  # e.g., gfx1100, gfx1101, gfx1201
+
+# --no-build-isolation ensures the build uses your existing ROCm PyTorch
+# instead of pulling the default CUDA PyTorch from PyPI
+CAUSAL_CONV1D_FORCE_BUILD=TRUE pip install --no-build-isolation -e .
+```
+
+`--no-build-isolation` is required because pip's default build isolation installs a CUDA-only PyTorch, which causes the HIP detection to fail.
+
+### Patching ROCm 6.0
+
+If you are on ROCm 6.0, apply the following patch before building. This is not required for ROCm 6.1 onwards.
 
 1. Locate your ROCm installation directory. This is typically found at `/opt/rocm/`, but may vary depending on your installation.
 
