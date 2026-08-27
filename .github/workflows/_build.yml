@@ -82,7 +82,7 @@ jobs:
 
       - name: Install CUDA ${{ inputs.cuda-version }}
         if: ${{ inputs.cuda-version != 'cpu' }}
-        uses: Jimver/cuda-toolkit@v0.2.30
+        uses: Jimver/cuda-toolkit@v0.2.35
         id: cuda-toolkit
         with:
           cuda: ${{ inputs.cuda-version }}
@@ -108,6 +108,9 @@ jobs:
               '2.8': [126, 128, 129], \
               '2.9': [126, 128, 130], \
               '2.10': [126, 128, 130], \
+              '2.11': [126, 128, 130], \
+              '2.12': [126, 130, 132], \
+              '2.13': [126, 130, 132], \
             }[env['MATRIX_TORCH_VERSION']]; \
             sys_cuda = int(env['MATRIX_CUDA_VERSION']); \
             print(max(v for v in available if v <= sys_cuda))" \
