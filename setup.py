@@ -191,8 +191,13 @@ if not SKIP_CUDA_BUILD:
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_120,code=sm_120")
         if bare_metal_version >= Version("13.0"):
-            cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_103,code=sm_103")
+            # Skip explicit `compute_103,sm_103` codegen even though nvcc 13.x
+            # supports it: nvcc 13.2 produces a numerically-broken cubin for
+            # `causal_conv1d_fwd` / `causal_conv1d_update` at this arch
+            # (max_abs_err ~0.4-0.6 on BF16, `update`'s in-place state write
+            # is dropped). The sm_100 cubin is forward-compatible to sm_103
+            # within the Blackwell family and gives bit-exact correct output
+            # on B300. See https://github.com/Dao-AILab/causal-conv1d/issues/105
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_110,code=sm_110")
             cc_flag.append("-gencode")
