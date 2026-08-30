@@ -37,6 +37,10 @@ this_dir = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_NAME = "causal_conv1d"
 
 BASE_WHEEL_URL = "https://github.com/Dao-AILab/causal-conv1d/releases/download/{tag_name}/{wheel_name}"
+# Wheel-build reruns are published under `v{version}.postN` tags (e.g. v1.6.1.post4)
+# while the wheel filenames inside them keep the plain version, so wheel lookup for a
+# PyPI sdist must also probe those tags. Highest .postN seen so far is 8 (v1.5.0.post8).
+MAX_WHEEL_POST = 10
 
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
 # SKIP_CUDA_BUILD: Intended to allow CI to use a simple `python setup.py sdist` run to copy over raw files, without any cuda compilation
@@ -306,10 +310,19 @@ def get_wheel_url():
     # Determine wheel URL based on CUDA version, torch version, python version and OS
     wheel_filename = f"{PACKAGE_NAME}-{causal_conv1d_version}+{cuda_or_hip}{gpu_compute_version}torch{torch_version}cxx11abi{cxx11_abi}-{python_version}-{python_version}-{platform_name}.whl"
 
-    wheel_url = BASE_WHEEL_URL.format(
-        tag_name=f"v{causal_conv1d_version}", wheel_name=wheel_filename
-    )
-    return wheel_url, wheel_filename
+    # The wheels for this version may live under a `v{version}.postN` rerun tag
+    # instead of `v{version}` (see issue #104), so return those tags as fallbacks,
+    # newest first.
+    tag_names = [f"v{causal_conv1d_version}"]
+    if not re.search(r"\.post\d+$", causal_conv1d_version):
+        tag_names += [
+            f"v{causal_conv1d_version}.post{n}" for n in range(MAX_WHEEL_POST, 0, -1)
+        ]
+    wheel_urls = [
+        BASE_WHEEL_URL.format(tag_name=tag_name, wheel_name=wheel_filename)
+        for tag_name in tag_names
+    ]
+    return wheel_urls, wheel_filename
 
 
 class CachedWheelsCommand(_bdist_wheel):
@@ -324,10 +337,13 @@ class CachedWheelsCommand(_bdist_wheel):
         if FORCE_BUILD:
             return super().run()
 
-        wheel_url, wheel_filename = get_wheel_url()
-        print("Guessing wheel URL: ", wheel_url)
-        try:
-            urllib.request.urlretrieve(wheel_url, wheel_filename)
+        wheel_urls, wheel_filename = get_wheel_url()
+        for wheel_url in wheel_urls:
+            print("Guessing wheel URL: ", wheel_url)
+            try:
+                urllib.request.urlretrieve(wheel_url, wheel_filename)
+            except urllib.error.HTTPError:
+                continue
 
             # Make the archive
             # Lifted from the root wheel processing command
@@ -341,10 +357,10 @@ class CachedWheelsCommand(_bdist_wheel):
             wheel_path = os.path.join(self.dist_dir, archive_basename + ".whl")
             print("Raw wheel path", wheel_path)
             shutil.move(wheel_filename, wheel_path)
-        except urllib.error.HTTPError:
-            print("Precompiled wheel not found. Building from source...")
-            # If the wheel could not be downloaded, build from source
-            super().run()
+            return
+        print("Precompiled wheel not found. Building from source...")
+        # If no wheel could be downloaded, build from source
+        super().run()
 
 
 setup(
