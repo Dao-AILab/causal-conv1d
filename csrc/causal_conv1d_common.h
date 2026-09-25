@@ -6,15 +6,9 @@
 
 #include <algorithm>
 #include <cuda_runtime_api.h>
-#include <torch/headeronly/util/Exception.h>
-
-// Stable-ABI-safe replacements for C10_CUDA_CHECK / C10_CUDA_KERNEL_LAUNCH_CHECK.
-inline void causal_conv1d_cuda_check(cudaError_t err, const char* file, int line) {
-    STD_TORCH_CHECK(err == cudaSuccess, "CUDA error ", cudaGetErrorString(err),
-                    " at ", file, ":", line);
-}
-#define CAUSAL_CONV1D_CUDA_CHECK(EXPR) causal_conv1d_cuda_check((EXPR), __FILE__, __LINE__)
-#define CAUSAL_CONV1D_KERNEL_LAUNCH_CHECK() CAUSAL_CONV1D_CUDA_CHECK(cudaGetLastError())
+// STD_CUDA_CHECK / STD_CUDA_KERNEL_LAUNCH_CHECK: stable-ABI replacements for
+// C10_CUDA_CHECK / C10_CUDA_KERNEL_LAUNCH_CHECK.
+#include <torch/csrc/stable/macros.h>
 
 #ifndef USE_ROCM
     #include <cuda_bf16.h>

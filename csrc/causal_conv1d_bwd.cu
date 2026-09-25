@@ -269,12 +269,12 @@ void causal_conv1d_bwd_launch(ConvParamsBwd &params, cudaStream_t stream) {
                 auto kernel = &causal_conv1d_bwd_kernel<Ktraits, kDeterministic>;
                 if (kSmemSize >= 48 * 1024) {
                     // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
-                    CAUSAL_CONV1D_CUDA_CHECK(cudaFuncSetAttribute(
+                    STD_CUDA_CHECK(cudaFuncSetAttribute(
                         ROCM_ONLY((void *)) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
                     ROCM_ONLY(std::cerr << "Warning (causal_conv1d bwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl);
                 }
                 kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
-                CAUSAL_CONV1D_KERNEL_LAUNCH_CHECK();
+                STD_CUDA_KERNEL_LAUNCH_CHECK();
             });
         });
     });
@@ -617,12 +617,12 @@ void causal_conv1d_channellast_bwd_launch(ConvParamsBwd &params, cudaStream_t st
                         dim3 block(Ktraits::kNThreads);
                         auto kernel = &causal_conv1d_channellast_bwd_kernel<Ktraits, kHasSeqIdx, kHasDfinalStates, kDeterministic>;
                         // if (kSmemSize >= 48 * 1024) {
-                        //     CAUSAL_CONV1D_CUDA_CHECK(cudaFuncSetAttribute(
+                        //     STD_CUDA_CHECK(cudaFuncSetAttribute(
                         //         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
                         //     }
                         // kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
                         kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-                        CAUSAL_CONV1D_KERNEL_LAUNCH_CHECK();
+                        STD_CUDA_KERNEL_LAUNCH_CHECK();
                     });
                 });
             });

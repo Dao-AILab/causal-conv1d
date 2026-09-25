@@ -120,7 +120,7 @@ void causal_conv1d_update_launch(ConvParamsBase &params, cudaStream_t stream) {
         ? &causal_conv1d_update_kernel<Ktraits, false>
         : &causal_conv1d_update_kernel<Ktraits, true>;
     kernel<<<grid, Ktraits::kNThreads, 0, stream>>>(params);
-    CAUSAL_CONV1D_KERNEL_LAUNCH_CHECK();
+    STD_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename input_t, typename weight_t>
