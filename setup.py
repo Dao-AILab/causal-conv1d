@@ -24,8 +24,8 @@ from torch.utils.cpp_extension import (
     CUDAExtension,
     CUDA_HOME,
     HIP_HOME,
+    min_supported_cpython,
 )
-
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -37,6 +37,12 @@ this_dir = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_NAME = "causal_conv1d"
 
 BASE_WHEEL_URL = "https://github.com/Dao-AILab/causal-conv1d/releases/download/{tag_name}/{wheel_name}"
+
+# Stable-ABI floor: the lowest Torch version with every stable API we call.
+# TORCH_TARGET_VERSION pins the ABI floor and implies TORCH_STABLE_ONLY, which
+# turns any at::/c10::/non-stable torch:: use into a compile error.
+TORCH_STABLE_ABI_MIN = (2, 10)
+TORCH_TARGET_VERSION = "0x{:02X}{:02X}000000000000".format(*TORCH_STABLE_ABI_MIN)
 
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
 # SKIP_CUDA_BUILD: Intended to allow CI to use a simple `python setup.py sdist` run to copy over raw files, without any cuda compilation
@@ -206,10 +212,17 @@ if not SKIP_CUDA_BUILD:
 
     if HIP_BUILD:
         extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17"],
+            "cxx": [
+                "-O3",
+                "-std=c++17",
+                f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                "-DTORCH_STABLE_ONLY",
+            ],
             "nvcc": [
                 "-O3",
                 "-std=c++17",
+                f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                "-DTORCH_STABLE_ONLY",
                 f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
                 "-U__CUDA_NO_HALF_OPERATORS__",
                 "-U__CUDA_NO_HALF_CONVERSIONS__",
@@ -219,10 +232,20 @@ if not SKIP_CUDA_BUILD:
         }
     else:
         extra_compile_args = {
-            "cxx": ["-O3"],
+            # -DUSE_CUDA exposes aoti_torch_get_current_cuda_stream in shim.h.
+            # See https://github.com/pytorch/extension-cpp
+            "cxx": [
+                "-O3",
+                "-DUSE_CUDA",
+                f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                "-DTORCH_STABLE_ONLY",
+            ],
             "nvcc": append_nvcc_threads(
                 [
                     "-O3",
+                    "-DUSE_CUDA",
+                    f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                    "-DTORCH_STABLE_ONLY",
                     "-U__CUDA_NO_HALF_OPERATORS__",
                     "-U__CUDA_NO_HALF_CONVERSIONS__",
                     "-U__CUDA_NO_BFLOAT16_OPERATORS__",
@@ -241,7 +264,7 @@ if not SKIP_CUDA_BUILD:
 
     ext_modules.append(
         CUDAExtension(
-            name="causal_conv1d_cuda",
+            name="causal_conv1d._C",
             sources=[
                 "csrc/causal_conv1d.cpp",
                 "csrc/causal_conv1d_fwd.cu",
@@ -250,6 +273,8 @@ if not SKIP_CUDA_BUILD:
             ],
             extra_compile_args=extra_compile_args,
             include_dirs=[Path(this_dir) / "csrc"],
+            # abi3 build; BuildExtension injects -DPy_LIMITED_API.
+            py_limited_api=True,
         )
     )
 
@@ -347,6 +372,14 @@ class CachedWheelsCommand(_bdist_wheel):
             super().run()
 
 
+# Use Torch's minimum supported CPython for requires-python and wheel tag.
+_CPYTHON_MIN = int(min_supported_cpython, 16)
+_PY_MAJOR = (_CPYTHON_MIN >> 24) & 0xFF
+_PY_MINOR = (_CPYTHON_MIN >> 16) & 0xFF
+PY_LIMITED_API = f"cp{_PY_MAJOR}{_PY_MINOR}"
+PYTHON_REQUIRES = f">={_PY_MAJOR}.{_PY_MINOR}"
+
+
 setup(
     name=PACKAGE_NAME,
     version=get_package_version(),
@@ -379,9 +412,10 @@ setup(
     else {
         "bdist_wheel": CachedWheelsCommand,
     },
-    python_requires=">=3.9",
+    options={"bdist_wheel": {"py_limited_api": PY_LIMITED_API}},
+    python_requires=PYTHON_REQUIRES,
     install_requires=[
-        "torch",
+        f"torch >= {TORCH_STABLE_ABI_MIN[0]}.{TORCH_STABLE_ABI_MIN[1]}",
         "packaging",
         "ninja",
     ],

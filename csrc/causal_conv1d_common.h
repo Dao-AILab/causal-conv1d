@@ -4,6 +4,12 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cuda_runtime_api.h>
+// STD_CUDA_CHECK / STD_CUDA_KERNEL_LAUNCH_CHECK: stable-ABI replacements for
+// C10_CUDA_CHECK / C10_CUDA_KERNEL_LAUNCH_CHECK.
+#include <torch/csrc/stable/macros.h>
+
 #ifndef USE_ROCM
     #include <cuda_bf16.h>
 

@@ -1,11 +1,26 @@
 # Copyright (c) 2024, Tri Dao.
 
+import os
+
 import torch
 
-import causal_conv1d_cuda
+# Import registers the stable-ABI ops into the `causal_conv1d` namespace.
+from . import _C  # noqa: F401
+
+causal_conv1d_cuda = torch.ops.causal_conv1d
 
 
 LIBRARY_NAME = "DaoAILab"
+
+
+def _use_deterministic_mode() -> bool:
+    # CAUSAL_CONV1D_DETERMINISTIC overrides; otherwise follow torch's global flag.
+    env = os.environ.get("CAUSAL_CONV1D_DETERMINISTIC")
+    if env == "1":
+        return True
+    if env == "0":
+        return False
+    return torch.are_deterministic_algorithms_enabled()
 
 
 @torch.library.custom_op(f"{LIBRARY_NAME}::_causal_conv1d_fwd_cpp", mutates_args={"out", "final_states_out"})
@@ -51,6 +66,7 @@ def _causal_conv1d_bwd_cpp(
     dbias: torch.Tensor | None,
     dinitial_states: torch.Tensor,
     silu_activation: bool,
+    deterministic: bool,
 ) -> None:
     causal_conv1d_cuda.causal_conv1d_bwd(
         x,
@@ -65,6 +81,7 @@ def _causal_conv1d_bwd_cpp(
         dbias,
         dinitial_states,
         silu_activation,
+        deterministic,
     )
 
 
@@ -152,6 +169,7 @@ def causal_conv1d_bwd_function(
         dbias=dbias,
         dinitial_states=dinitial_states,
         silu_activation=silu_activation,
+        deterministic=_use_deterministic_mode(),
     )
 
     dweight = dweight.type_as(weight)
