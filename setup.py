@@ -38,6 +38,12 @@ PACKAGE_NAME = "causal_conv1d"
 
 BASE_WHEEL_URL = "https://github.com/Dao-AILab/causal-conv1d/releases/download/{tag_name}/{wheel_name}"
 
+# Stable-ABI floor: the lowest Torch version with every stable API we call.
+# TORCH_TARGET_VERSION pins the ABI floor and implies TORCH_STABLE_ONLY, which
+# turns any at::/c10::/non-stable torch:: use into a compile error.
+TORCH_STABLE_ABI_MIN = (2, 10)
+TORCH_TARGET_VERSION = "0x{:02X}{:02X}000000000000".format(*TORCH_STABLE_ABI_MIN)
+
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
 # SKIP_CUDA_BUILD: Intended to allow CI to use a simple `python setup.py sdist` run to copy over raw files, without any cuda compilation
 FORCE_BUILD = os.getenv("CAUSAL_CONV1D_FORCE_BUILD", "FALSE") == "TRUE"
@@ -206,10 +212,17 @@ if not SKIP_CUDA_BUILD:
 
     if HIP_BUILD:
         extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17"],
+            "cxx": [
+                "-O3",
+                "-std=c++17",
+                f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                "-DTORCH_STABLE_ONLY",
+            ],
             "nvcc": [
                 "-O3",
                 "-std=c++17",
+                f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                "-DTORCH_STABLE_ONLY",
                 f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
                 "-U__CUDA_NO_HALF_OPERATORS__",
                 "-U__CUDA_NO_HALF_CONVERSIONS__",
@@ -221,11 +234,18 @@ if not SKIP_CUDA_BUILD:
         extra_compile_args = {
             # -DUSE_CUDA exposes aoti_torch_get_current_cuda_stream in shim.h.
             # See https://github.com/pytorch/extension-cpp
-            "cxx": ["-O3", "-DUSE_CUDA"],
+            "cxx": [
+                "-O3",
+                "-DUSE_CUDA",
+                f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                "-DTORCH_STABLE_ONLY",
+            ],
             "nvcc": append_nvcc_threads(
                 [
                     "-O3",
                     "-DUSE_CUDA",
+                    f"-DTORCH_TARGET_VERSION={TORCH_TARGET_VERSION}",
+                    "-DTORCH_STABLE_ONLY",
                     "-U__CUDA_NO_HALF_OPERATORS__",
                     "-U__CUDA_NO_HALF_CONVERSIONS__",
                     "-U__CUDA_NO_BFLOAT16_OPERATORS__",
@@ -395,7 +415,7 @@ setup(
     options={"bdist_wheel": {"py_limited_api": PY_LIMITED_API}},
     python_requires=PYTHON_REQUIRES,
     install_requires=[
-        "torch >= 2.11",
+        f"torch >= {TORCH_STABLE_ABI_MIN[0]}.{TORCH_STABLE_ABI_MIN[1]}",
         "packaging",
         "ninja",
     ],

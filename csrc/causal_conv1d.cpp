@@ -4,11 +4,6 @@
 
 #include <Python.h>
 
-// Stable-ABI target PyTorch 2.11; must precede any torch header.
-#ifndef TORCH_TARGET_VERSION
-#define TORCH_TARGET_VERSION (((0ULL + 2) << 56) | ((0ULL + 11) << 48))
-#endif
-
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
