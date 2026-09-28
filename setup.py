@@ -210,10 +210,10 @@ if not SKIP_CUDA_BUILD:
 
     if HIP_BUILD:
         extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17"],
+            "cxx": ["-O3", "-std=c++20"],
             "nvcc": [
                 "-O3",
-                "-std=c++17",
+                "-std=c++20",
                 f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
                 "-U__CUDA_NO_HALF_OPERATORS__",
                 "-U__CUDA_NO_HALF_CONVERSIONS__",
