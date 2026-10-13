@@ -1,0 +1,36 @@
+name: Stable CUDA wheel matrix
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wheels:
+    permissions:
+      id-token: write
+      attestations: write
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.14t", "3.15t"]
+        cuda-version: ["13.4.2", "12.9.2", "12.8.2"]
+        cxx11_abi: ["TRUE"]
+        include:
+          - {cuda-version: "13.4.2", torch-version: "2.14.1", torch-index: cu132}
+          - {cuda-version: "12.9.2", torch-version: "2.13.0", torch-index: cu129}
+          - {cuda-version: "12.8.2", torch-version: "2.11.0", torch-index: cu128}
+        exclude:
+          # Torch cu129 has no Windows wheels; cu128 stops at Python 3.14.
+          - {os: windows-2025, cuda-version: "12.9.2"}
+          - {python-version: "3.15", cuda-version: "12.8.2"}
+          - {python-version: "3.15t", cuda-version: "12.8.2"}
+    uses: $/.github/workflows/_build.yml
+    with:
+      runs-on: ${{ matrix.os }}
+      python-version: ${{ matrix.python-version }}
+      cuda-version: ${{ matrix.cuda-version }}
+      torch-version: ${{ matrix.torch-version }}
+      torch-index: ${{ matrix.torch-index }}
+      cxx11_abi: ${{ matrix.cxx11_abi }}
+      upload-to-release: false

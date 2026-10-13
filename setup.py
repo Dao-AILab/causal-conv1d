@@ -1,6 +1,7 @@
 # Copyright (c) 2024, Tri Dao.
 
 import sys
+import sysconfig
 import warnings
 import os
 import re
@@ -15,7 +16,7 @@ import subprocess
 
 import urllib.request
 import urllib.error
-from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
 
 import torch
 from torch.utils.cpp_extension import (
@@ -57,7 +58,7 @@ def get_platform():
         return "linux_x86_64"
     elif sys.platform == "darwin":
         mac_version = ".".join(platform.mac_ver()[0].split(".")[:2])
-        return f"macosx_{mac_version}_x86_64"
+        return f"macosx_{mac_version}_{platform.machine()}"
     elif sys.platform == "win32":
         return "win_amd64"
     else:
@@ -127,6 +128,8 @@ def check_if_cuda_home_none(global_option: str) -> None:
 
 
 def append_nvcc_threads(nvcc_extra_args):
+    if sys.platform == "win32":
+        nvcc_extra_args = nvcc_extra_args + ["-Xcompiler=/Zc:preprocessor"]
     return nvcc_extra_args + ["--threads", "4"]
 
 
@@ -204,12 +207,13 @@ if not SKIP_CUDA_BUILD:
     if FORCE_CXX11_ABI:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
 
+    cxx_flags = ["/O2", "/std:c++20", "/Zc:preprocessor"] if sys.platform == "win32" else ["-O3", "-std=c++20"]
     if HIP_BUILD:
         extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17"],
+            "cxx": cxx_flags,
             "nvcc": [
                 "-O3",
-                "-std=c++17",
+                "-std=c++20",
                 f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
                 "-U__CUDA_NO_HALF_OPERATORS__",
                 "-U__CUDA_NO_HALF_CONVERSIONS__",
@@ -219,7 +223,7 @@ if not SKIP_CUDA_BUILD:
         }
     else:
         extra_compile_args = {
-            "cxx": ["-O3"],
+            "cxx": cxx_flags,
             "nvcc": append_nvcc_threads(
                 [
                     "-O3",
@@ -293,6 +297,7 @@ def get_wheel_url():
     cuda_or_hip = "hip" if HIP_BUILD else "cu"
 
     python_version = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    python_abi = python_version + ("t" if sysconfig.get_config_var("Py_GIL_DISABLED") else "")
     platform_name = get_platform()
     causal_conv1d_version = get_package_version()
 
@@ -304,7 +309,7 @@ def get_wheel_url():
     cxx11_abi = str(torch._C._GLIBCXX_USE_CXX11_ABI).upper()
 
     # Determine wheel URL based on CUDA version, torch version, python version and OS
-    wheel_filename = f"{PACKAGE_NAME}-{causal_conv1d_version}+{cuda_or_hip}{gpu_compute_version}torch{torch_version}cxx11abi{cxx11_abi}-{python_version}-{python_version}-{platform_name}.whl"
+    wheel_filename = f"{PACKAGE_NAME}-{causal_conv1d_version}+{cuda_or_hip}{gpu_compute_version}torch{torch_version}cxx11abi{cxx11_abi}-{python_version}-{python_abi}-{platform_name}.whl"
 
     wheel_url = BASE_WHEEL_URL.format(
         tag_name=f"v{causal_conv1d_version}", wheel_name=wheel_filename
@@ -379,7 +384,7 @@ setup(
     else {
         "bdist_wheel": CachedWheelsCommand,
     },
-    python_requires=">=3.9",
+    python_requires=">=3.10",
     install_requires=[
         "torch",
         "packaging",

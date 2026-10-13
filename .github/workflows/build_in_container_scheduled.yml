@@ -5,8 +5,12 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
+permissions:
+  contents: read
+
 jobs:
   compute_matrix:
+    if: github.repository == 'Dao-AILab/causal-conv1d' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       runners: ${{ steps.compute.outputs.RUNNERS }}
@@ -14,8 +18,10 @@ jobs:
       release-versions: ${{ steps.compute.outputs.RELEASES }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+        with:
+          persist-credentials: false
       - name: Check for NGC PyTorch images
         run: bash ./.github/scripts/check_for_ngc_images.sh
 
@@ -40,9 +46,8 @@ jobs:
         runner: ${{ fromJson(needs.compute_matrix.outputs.runners) }}
         container-image: ${{ fromJson(needs.compute_matrix.outputs.container-images) }}
         release-version: ${{ fromJson(needs.compute_matrix.outputs.release-versions) }}
-    uses: ./.github/workflows/_build_in_container.yml
+    uses: $/.github/workflows/_build_in_container.yml
     with:
       runs-on: ${{ matrix.runner }}
       container-image: ${{ matrix.container-image }}
-      upload-to-release: false
       release-version: ${{ matrix.release-version }}
