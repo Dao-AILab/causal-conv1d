@@ -123,9 +123,9 @@ def causal_conv1d_bwd_function(
     initial_states: torch.Tensor | None,
     dfinal_states: torch.Tensor | None,
     dx: torch.Tensor | None,
-    return_dinitial_states: torch.Tensor,
+    return_dinitial_states: bool,
     silu_activation: bool,
-) -> tuple[torch.Tensor | None]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
     batch_size, dim = x.size()[:2]
     width = weight.size(-1)
 
