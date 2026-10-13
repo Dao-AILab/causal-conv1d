@@ -1,207 +1,152 @@
-name: ~Build wheel template
-
+name: Build CUDA wheel
 on:
   workflow_call:
     inputs:
       runs-on:
-        description: "The runner to use for the build"
         required: true
         type: string
       python-version:
-        description: "The Python version to use for the build"
         required: true
         type: string
       cuda-version:
-        description: "The CUDA version to use for the build"
         required: true
         type: string
       torch-version:
-        description: "The PyTorch version to use for the build"
         required: true
         type: string
+      torch-index:
+        type: string
+        default: cu132
       cxx11_abi:
-        description: "The C++11 ABI to use for the build"
         required: true
         type: string
       upload-to-release:
-        description: "Upload wheel to this release"
-        required: false
         type: boolean
-        default: false
       release-version:
-        description: "Upload wheel to this release"
-        required: false
         type: string
-
-defaults:
-  run:
-    shell: bash -x -e -u -o pipefail {0}
-
 jobs:
   build-wheel:
-    runs-on: ${{ inputs.runs-on }}
-    name: Build wheel (${{ inputs.release-version }}-${{ inputs.python-version }}-${{ inputs.cuda-version }}-${{ inputs.torch-version }}-${{ inputs.cxx11_abi }})
+    permissions:
+      contents: read
+    # CUDA 12 needs the Visual Studio 2022 runner image.
+    runs-on: ${{ inputs.runs-on == 'windows-2025' && startsWith(inputs.cuda-version, '12.') && 'windows-2022' || inputs.runs-on }}
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.release-version }}
           submodules: recursive
-
-      - name: Checkout build scripts
-        uses: actions/checkout@v4
-        with:
-          path: build-scripts/
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Set CUDA and PyTorch versions
+          activate-environment: true
+      - uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+          vsversion: ${{ startsWith(inputs.cuda-version, '12.') && '2022' || '' }}
+      # The CUDA action's Windows download table predates CUDA 13.4.
+      - name: Install CUDA on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
-          echo "MATRIX_CUDA_VERSION=$(echo ${{ inputs.cuda-version }} | awk -F \. {'print $1 $2'})" >> $GITHUB_ENV
-          echo "MATRIX_TORCH_VERSION=$(echo ${{ inputs.torch-version }} | awk -F \. {'print $1 "." $2'})" >> $GITHUB_ENV
-          echo "WHEEL_CUDA_VERSION=$(echo ${{ inputs.cuda-version }} | awk -F \. {'print $1'})" >> $GITHUB_ENV
-          echo "MATRIX_PYTHON_VERSION=$(echo ${{ inputs.python-version }} | awk -F \. {'print $1 $2'})" >> $GITHUB_ENV
-
-      - name: Free up disk space
-        if: ${{ runner.os == 'Linux' }}
-        # https://github.com/easimon/maximize-build-space/blob/master/action.yml
-        # https://github.com/easimon/maximize-build-space/tree/test-report
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-
-      - name: Set up swap space
+          $minor = ($env:CUDA_VERSION -split '\.')[0..1] -join '.'
+          $installer = Join-Path $env:RUNNER_TEMP 'cuda.exe'
+          $arch = if ([version]$env:CUDA_VERSION -ge [version]'13.4') { '_x86_64' } else { '' }
+          Invoke-WebRequest "https://developer.download.nvidia.com/compute/cuda/$env:CUDA_VERSION/network_installers/cuda_$($env:CUDA_VERSION)_windows$($arch)_network.exe" -OutFile $installer
+          $signature = Get-AuthenticodeSignature $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'NVIDIA') { throw 'Invalid NVIDIA installer signature' }
+          $packages = "-s nvcc_$minor cudart_$minor thrust_$minor"
+          if ([version]$env:CUDA_VERSION -ge [version]'13.0') { $packages += " crt_$minor nvvm_$minor" }
+          $process = Start-Process $installer -ArgumentList $packages -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "CUDA installer failed: $($process.ExitCode)" }
+          $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$minor"
+          "CUDA_PATH=$cudaPath" >> $env:GITHUB_ENV
+          "DISTUTILS_USE_SDK=1" >> $env:GITHUB_ENV
+          "$cudaPath\bin" >> $env:GITHUB_PATH
+          Remove-Item $installer
+      - name: Install CUDA on Linux
         if: runner.os == 'Linux'
-        uses: pierotofy/set-swap-space@v1.0
-        with:
-          swap-size-gb: 10
-
-      - name: Install CUDA ${{ inputs.cuda-version }}
-        if: ${{ inputs.cuda-version != 'cpu' }}
-        uses: Jimver/cuda-toolkit@v0.2.30
-        id: cuda-toolkit
-        with:
-          cuda: ${{ inputs.cuda-version }}
-          linux-local-args: '["--toolkit"]'
-          # default method is "local", and we're hitting some error with caching for CUDA 11.8 and 12.1
-          # method: ${{ (inputs.cuda-version == '11.8.0' || inputs.cuda-version == '12.1.0') && 'network' || 'local' }}
-          method: "network"
-          sub-packages: '["nvcc"]'
-
-      - name: Install PyTorch ${{ inputs.torch-version }}+cu${{ inputs.cuda-version }}
+        env:
+          CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
-          pip install --upgrade pip
-          # For some reason torch 2.2.0 on python 3.12 errors saying no setuptools
-          pip install setuptools==68.0.0
-          # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
-          # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
-          pip install typing-extensions==4.12.2
-          # Pick the highest available PyTorch wheel CUDA version that doesn't exceed system CUDA
-          export TORCH_CUDA_VERSION=$(python -c "from os import environ as env; \
-            available = { \
-              '2.6': [118, 124, 126], \
-              '2.7': [118, 126, 128], \
-              '2.8': [126, 128, 129], \
-              '2.9': [126, 128, 130], \
-              '2.10': [126, 128, 130], \
-            }[env['MATRIX_TORCH_VERSION']]; \
-            sys_cuda = int(env['MATRIX_CUDA_VERSION']); \
-            print(max(v for v in available if v <= sys_cuda))" \
-          )
-          if [[ ${{ inputs.torch-version }} == *"dev"* ]]; then
-            # pip install --no-cache-dir --pre torch==${{ inputs.torch-version }} --index-url https://download.pytorch.org/whl/nightly/cu${TORCH_CUDA_VERSION}
-            # Can't use --no-deps because we need cudnn etc.
-            # Hard-coding this version of pytorch-triton for torch 2.6.0.dev20241001
-            pip install jinja2
-            pip install https://download.pytorch.org/whl/nightly/pytorch_triton-3.1.0%2Bcf34004b8a-cp${MATRIX_PYTHON_VERSION}-cp${MATRIX_PYTHON_VERSION}-linux_x86_64.whl
-            pip install --no-cache-dir --pre https://download.pytorch.org/whl/nightly/cu${TORCH_CUDA_VERSION}/torch-${{ inputs.torch-version }}%2Bcu${TORCH_CUDA_VERSION}-cp${MATRIX_PYTHON_VERSION}-cp${MATRIX_PYTHON_VERSION}-linux_x86_64.whl
-          else
-            pip install --no-cache-dir torch==${{ inputs.torch-version }} --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
-          fi
+          arch=$(uname -m)
+          if [[ "$arch" == aarch64 ]]; then arch=sbsa; fi
+          distro=$(lsb_release -sr)
+          repo="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${distro//./}/$arch"
+          curl -fsSL "$repo/cuda-keyring_1.1-1_all.deb" -o "$RUNNER_TEMP/cuda-keyring.deb"
+          sudo dpkg -i "$RUNNER_TEMP/cuda-keyring.deb"
+          sudo apt-get -o Acquire::Retries=3 update || { sleep 30; sudo apt-get -o Acquire::Retries=3 update; }
+          minor=$(cut -d. -f1,2 <<< "$CUDA_VERSION")
+          sudo apt-get install -y "cuda-minimal-build-${minor//./-}"
+          echo "CUDA_HOME=/usr/local/cuda-$minor" >> "$GITHUB_ENV"
+          echo "/usr/local/cuda-$minor/bin" >> "$GITHUB_PATH"
+      - name: Install build dependencies and matching PyTorch wheel
+        env:
+          TORCH_VERSION: ${{ inputs.torch-version }}
+          TORCH_BACKEND: ${{ inputs.torch-index }}
+        run: |
+          uv pip install --group build --upgrade --no-sources --torch-backend "$TORCH_BACKEND" "torch==$TORCH_VERSION"
           nvcc --version
-          python --version
-          python -c "import torch; print('PyTorch:', torch.__version__)"
-          python -c "import torch; print('CUDA:', torch.version.cuda)"
-          python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
-        shell: bash
-
-      - name: Restore build cache
-        uses: actions/cache/restore@v4
-        with:
-          path: build.tar
-          key: build-${{ inputs.release-version }}-${{ inputs.python-version }}-${{ inputs.cuda-version }}-${{ inputs.torch-version }}-${{ inputs.cxx11_abi }}-${{ github.run_number }}-${{ github.run_attempt }}
-          restore-keys: |
-            build-${{ inputs.release-version }}-${{ inputs.python-version }}-${{ inputs.cuda-version }}-${{ inputs.torch-version }}-${{ inputs.cxx11_abi }}-
-
-      - name: Unpack build cache
-        run: |
-          echo ::group::Adjust timestamps
-          sudo find / -exec touch -t 197001010000 {} + || true
-          echo ::endgroup::
-
-          if [ -f build.tar ]; then
-            find . -mindepth 1 -maxdepth 1 ! -name 'build.tar' -exec rm -rf {} +
-            tar -xpvf build.tar -C .
-          else
-            echo "No build.tar found, skipping"
-          fi
-
-          ls -al ./
-          ls -al build/ || true
-          ls -al csrc/ || true
-
       - name: Build wheel
-        id: build_wheel
         env:
-          CXX11_ABI: ${{ inputs.cxx11_abi }}
-          MATRIX_TORCH_VERSION: ${{ env.MATRIX_TORCH_VERSION}}
-          WHEEL_CUDA_VERSION: ${{ env.WHEEL_CUDA_VERSION }}
-          MATRIX_PYTHON_VERSION: ${{ env.MATRIX_PYTHON_VERSION }}
+          CAUSAL_CONV1D_FORCE_BUILD: "TRUE"
+          CAUSAL_CONV1D_FORCE_CXX11_ABI: ${{ inputs.cxx11_abi }}
+          TORCH_VERSION: ${{ inputs.torch-version }}
         run: |
-          EXIT_CODE=$(bash build-scripts/.github/scripts/build.sh | tail -n 1)
-
-          # Store exit code in GitHub env for later steps
-          echo "build_exit_code=$EXIT_CODE" | tee -a "$GITHUB_OUTPUT"
-
-          exit $EXIT_CODE
-
-      - name: Log build logs after timeout
-        if: always() && steps.build_wheel.outputs.build_exit_code == 124
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+          import torch
+          suffix = f"cu{torch.version.cuda.split('.')[0]}torch{'.'.join(os.environ['TORCH_VERSION'].split('.')[:2])}cxx11abi{str(torch._C._GLIBCXX_USE_CXX11_ABI).upper()}"
+          os.environ["CAUSAL_CONV1D_LOCAL_VERSION"] = suffix
+          subprocess.run([sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", "dist"], check=True)
+          for wheel in Path('dist').glob('*.whl'):
+              package, version, tags = wheel.name.split('-', 2)
+              version = version.split('+', 1)[0]
+              wheel.rename(wheel.with_name(f"{package}-{version}+{suffix}-{tags}"))
+          PY
+      - name: Report Linux wheel compatibility
+        if: runner.os == 'Linux'
         run: |
-          ls -al ./
-          tar -cvf build.tar . --atime-preserve=replace
-
-      - name: Save build cache timeout
-        if: always() && steps.build_wheel.outputs.build_exit_code == 124
-        uses: actions/cache/save@v4
+          for wheel in dist/*.whl; do
+            python -m auditwheel show "$wheel"
+          done
+      - name: Test native extension import
+        run: |
+          uv pip install --no-deps dist/*.whl
+          cd "$RUNNER_TEMP"
+          python -W error::RuntimeWarning -c "import sys, sysconfig, torch, causal_conv1d_cuda; assert not sysconfig.get_config_var('Py_GIL_DISABLED') or not sys._is_gil_enabled()"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          key: build-${{ inputs.release-version }}-${{ inputs.python-version }}-${{ inputs.cuda-version }}-${{ inputs.torch-version }}-${{ inputs.cxx11_abi }}-${{ github.run_number }}-${{ github.run_attempt }}
-          path: build.tar
-
-      - name: Log Built Wheels
-        run: |
-          ls dist
-
-      - name: Get Release with tag
-        id: get_current_release
-        uses: joutvhu/get-release@v1
+          name: wheels-${{ inputs.runs-on }}-${{ inputs.python-version }}-${{ inputs.cuda-version }}-${{
+            inputs.torch-version }}
+          path: dist/*.whl
+          if-no-files-found: error
+  upload-release:
+    if: inputs.upload-to-release
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          tag_name: ${{ inputs.release-version }}
+          name: wheels-${{ inputs.runs-on }}-${{ inputs.python-version }}-${{ inputs.cuda-version }}-${{ inputs.torch-version }}
+          path: dist
+      - name: Attest distributions
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.whl
+      - name: Upload release assets
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Release Asset
-        id: upload_release_asset
-        if: inputs.upload-to-release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_current_release.outputs.upload_url }}
-          asset_path: ./dist/${{env.wheel_name}}
-          asset_name: ${{env.wheel_name}}
-          asset_content_type: application/*
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-version }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "$RELEASE_TAG" dist/*.whl --clobber

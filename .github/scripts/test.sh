@@ -3,4 +3,4 @@
 set -exou pipefail
 
 pip install dist/*.whl
-python -c "import causal_conv1d; print(causal_conv1d.__version__)"
+(cd /tmp && python -c "import causal_conv1d, causal_conv1d_cuda; print(causal_conv1d.__version__)")

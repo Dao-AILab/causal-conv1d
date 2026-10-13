@@ -12,7 +12,7 @@ on:
         description: "Container image"
         required: true
         type: string
-        default: "nvcr.io/nvidia/pytorch:25.06-py3"
+        default: "nvcr.io/nvidia/pytorch:26.09-py3"
       upload-to-release:
         description: "Upload wheel to this release"
         required: false
@@ -27,6 +27,9 @@ on:
     tags-ignore:
       - v*
 
+permissions:
+  contents: read
+
 jobs:
   get_version:
     runs-on: ubuntu-latest
@@ -36,21 +39,47 @@ jobs:
       - name: Get version from input or git
         id: get_version
         run: |
-          if [ -n "${{ inputs.release-version }}" ]; then
-            echo "version=${{ inputs.release-version }}" >> $GITHUB_OUTPUT
+          if [ -n "${CI_INPUTS_RELEASE_VERSION}" ]; then
+            echo "version=${CI_INPUTS_RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
           else
-            # Get the latest tag from the repo
-            git clone --filter=blob:none --no-checkout $GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git repo
-            cd repo
-            echo "version=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
+            echo "version=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           fi
         shell: bash
 
+        env:
+          CI_INPUTS_RELEASE_VERSION: ${{ inputs.release-version }}
   build-wheels:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     needs: [get_version]
-    uses: ./.github/workflows/_build_in_container.yml
+    uses: $/.github/workflows/_build_in_container.yml
     with:
       runs-on: ${{ inputs.runs-on || 'ubuntu-22.04' }}
-      container-image: ${{ inputs.container-image || 'nvcr.io/nvidia/pytorch:25.06-py3' }}
+      container-image: ${{ inputs.container-image || 'nvcr.io/nvidia/pytorch:26.09-py3' }}
       upload-to-release: ${{ inputs.upload-to-release || false }}
       release-version: ${{ needs.get_version.outputs.version }}
+  upload:
+    if: inputs.upload-to-release
+    needs: [get_version, build-wheels]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: container-wheels*
+          merge-multiple: true
+          path: dist
+      - name: Upload release wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.get_version.outputs.version }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.whl --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.whl --title "$RELEASE_TAG" --notes "" --verify-tag
+          fi

@@ -8,141 +8,149 @@
 name: Build wheels and deploy
 
 on:
-  create:
+  push:
     tags:
       - v*
 
+permissions:
+  contents: read
+
 jobs:
   setup_release:
+    if: github.repository == 'Dao-AILab/causal-conv1d'
     name: Create Release
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     outputs:
       release-version: ${{ steps.extract_branch.outputs.branch }}
     steps:
       - name: Get the tag version
         id: extract_branch
-        run: echo "branch=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "branch=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Create Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ steps.extract_branch.outputs.branch }} --repo $GITHUB_REPOSITORY --title ${{ steps.extract_branch.outputs.branch }} --generate-notes
+          RELEASE_TAG: ${{ steps.extract_branch.outputs.branch }}
+        run: gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TAG" --generate-notes
         shell: bash
 
   build_wheels:
     name: Build Wheel
+    permissions:
+      id-token: write
+      attestations: write
+      contents: write
     needs: setup_release
     strategy:
       fail-fast: false
       matrix:
-        # Using ubuntu-22.04 instead of 24.04 for more compatibility (glibc). Ideally we'd use the
-        # manylinux docker image, but I haven't figured out how to install CUDA on manylinux.
-        os: [ubuntu-22.04, ubuntu-22.04-arm]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-        torch-version: ["2.6.0", "2.7.1", "2.8.0", "2.9.1", "2.10.0"]
-        cuda-version: ["11.8.0", "12.9.1", "13.0.1"]
-        # We need separate wheels that either uses C++11 ABI (-D_GLIBCXX_USE_CXX11_ABI) or not.
-        # Pytorch wheels currently don't use it, but nvcr images have Pytorch compiled with C++11 ABI.
-        # Without this we get import error (undefined symbol: _ZN3c105ErrorC2ENS_14SourceLocationESs)
-        # when building without C++11 ABI and using it on nvcr images.
-        cxx11_abi: ["FALSE", "TRUE"]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.14t", "3.15t"]
+        cuda-version: ["13.4.2", "12.9.2", "12.8.2"]
+        cxx11_abi: ["TRUE"]
+        include:
+          - {cuda-version: "13.4.2", torch-version: "2.14.1", torch-index: cu132}
+          - {cuda-version: "12.9.2", torch-version: "2.13.0", torch-index: cu129}
+          - {cuda-version: "12.8.2", torch-version: "2.11.0", torch-index: cu128}
         exclude:
-          # CUDA 11.8 is not supported by PyTorch 2.8+
-          - torch-version: "2.8.0"
-            cuda-version: "11.8.0"
-          - torch-version: "2.9.1"
-            cuda-version: "11.8.0"
-          - torch-version: "2.10.0"
-            cuda-version: "11.8.0"
-          # CUDA 13.0 is only supported by PyTorch 2.9+
-          - torch-version: "2.6.0"
-            cuda-version: "13.0.1"
-          - torch-version: "2.7.1"
-            cuda-version: "13.0.1"
-          - torch-version: "2.8.0"
-            cuda-version: "13.0.1"
-          # No aarch64 PyTorch wheels for 2.6.0, or 2.7.1+cu118
-          - torch-version: "2.6.0"
-            os: ubuntu-22.04-arm
-          - torch-version: "2.7.1"
-            cuda-version: "11.8.0"
-            os: ubuntu-22.04-arm
-          # PyTorch 2.7+ pip wheels use CXX11_ABI=1 by default, no need for FALSE
-          - torch-version: "2.7.1"
-            cxx11_abi: "FALSE"
-          - torch-version: "2.8.0"
-            cxx11_abi: "FALSE"
-          - torch-version: "2.9.1"
-            cxx11_abi: "FALSE"
-          - torch-version: "2.10.0"
-            cxx11_abi: "FALSE"
-
-    uses: ./.github/workflows/_build.yml
+          # Torch cu129 has no Windows wheels; cu128 stops at Python 3.14.
+          - {os: windows-2025, cuda-version: "12.9.2"}
+          - {python-version: "3.15", cuda-version: "12.8.2"}
+          - {python-version: "3.15t", cuda-version: "12.8.2"}
+    uses: $/.github/workflows/_build.yml
     with:
       runs-on: ${{ matrix.os }}
       python-version: ${{ matrix.python-version }}
       cuda-version: ${{ matrix.cuda-version }}
       torch-version: ${{ matrix.torch-version }}
+      torch-index: ${{ matrix.torch-index }}
       cxx11_abi: ${{ matrix.cxx11_abi }}
       release-version: ${{ needs.setup_release.outputs.release-version }}
       upload-to-release: true
 
   check_for_ngc_images:
+    if: github.repository == 'Dao-AILab/causal-conv1d'
     runs-on: ubuntu-latest
     outputs:
       images: ${{ steps.check_for_ngc_images.outputs.IMAGES }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check for NGC PyTorch images
         id: check_for_ngc_images
         run: |
           bash ./.github/scripts/check_for_ngc_images.sh
-          echo "IMAGES=$(cat ngc_images.json| jq -cr)" >> $GITHUB_OUTPUT
+          echo "IMAGES=$(cat ngc_images.json| jq -cr)" >> "$GITHUB_OUTPUT"
 
   build_ngc_wheels:
     name: Build Wheel for NGC PyTorch
+    if: needs.check_for_ngc_images.outputs.images != '[]'
     needs: [setup_release, check_for_ngc_images]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm]
         container-image: ${{ fromJson(needs.check_for_ngc_images.outputs.images) }}
-    uses: ./.github/workflows/_build_in_container.yml
+    uses: $/.github/workflows/_build_in_container.yml
     with:
       runs-on: ${{ matrix.os }}
       container-image: ${{ matrix.container-image }}
       release-version: ${{ needs.setup_release.outputs.release-version }}
       upload-to-release: true
+      artifact-name: container-wheels-${{ strategy.job-index }}
 
+    permissions:
+      id-token: write
+      attestations: write
+      contents: write
   publish_package:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     name: Publish package
     needs: [build_wheels, build_ngc_wheels]
 
     runs-on: ubuntu-latest
-    if: always() && !cancelled()
+    if: always() && !cancelled() && github.repository == 'Dao-AILab/causal-conv1d' &&
+      needs.build_wheels.result == 'success' && (needs.build_ngc_wheels.result == 'success' || needs.build_ngc_wheels.result == 'skipped')
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.10"
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
 
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          activate-environment: true
       - name: Install dependencies
         run: |
-          pip install ninja packaging setuptools wheel twine
+          uv pip install --upgrade --group dev
           # We don't want to download anything CUDA-related here
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --upgrade torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Build core package
         env:
           CAUSAL_CONV1D_SKIP_CUDA_BUILD: "TRUE"
         run: |
-          python setup.py sdist --dist-dir=dist
+          python -m build --sdist --no-isolation --outdir dist
 
+      - name: Attest distributions
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Publish with trusted publishing
+        if: vars.USE_TRUSTED_PUBLISHING == 'true'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
       - name: Deploy
+        if: vars.USE_TRUSTED_PUBLISHING != 'true'
         env:
           TWINE_USERNAME: "__token__"
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

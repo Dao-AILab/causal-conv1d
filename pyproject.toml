@@ -1,3 +1,32 @@
 [build-system]
-requires = ["setuptools", "wheel", "torch"]
+requires = ["setuptools>=70.1", "wheel", "torch", "packaging", "ninja"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+build = [
+    "setuptools>=70.1",
+    "wheel",
+    "build",
+    "torch",
+    "packaging",
+    "ninja",
+    "auditwheel ; sys_platform == 'linux'",
+]
+test = ["pytest", "packaging"]
+dev = [{include-group = "build"}, {include-group = "test"}, "ruff", "pre-commit", "twine"]
+
+[tool.uv]
+prerelease = "disallow"
+
+[tool.uv.dependency-groups]
+build = {requires-python = ">=3.10"}
+dev = {requires-python = ">=3.10"}
+test = {requires-python = ">=3.10"}
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
