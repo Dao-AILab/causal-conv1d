@@ -369,7 +369,7 @@ void causal_conv1d_channellast_bwd_kernel(ConvParamsBwd params) {
     input_t *dinitial_states = params.dinitial_states_ptr == nullptr || chunk_l_id > 0 ? nullptr
         : reinterpret_cast<input_t *>(params.dinitial_states_ptr) + batch_id * params.dinitial_states_batch_stride + l_idx * params.dinitial_states_l_stride + chunk_c_id * kChunkSizeC + c_idx * kNElts;
     input_t *dfinal_states = params.dfinal_states_ptr == nullptr ? nullptr
-        : reinterpret_cast<input_t *>(params.dfinal_states_ptr) + batch_id * params.dfinal_states_batch_stride + chunk_c_id * kChunkSizeC;
+        : reinterpret_cast<input_t *>(params.dfinal_states_ptr) + batch_id * params.dfinal_states_batch_stride + chunk_c_id * kChunkSizeC * params.dfinal_states_c_stride;
 
     #pragma unroll
     for (int l = 0; l < Ktraits::kNLoads; ++l) {

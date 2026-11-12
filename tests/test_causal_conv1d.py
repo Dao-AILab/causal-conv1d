@@ -137,6 +137,46 @@ def test_causal_conv1d(dim, seqlen, width, has_bias, silu_activation, itype, cha
         assert torch.allclose(initial_states.grad, initial_states_ref.grad.to(dtype=itype), rtol=rtol, atol=atol)
 
 
+@pytest.mark.parametrize("dfinal_states_layout", ["contiguous", "expanded"])
+@pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("width", [2, 3, 4])
+@pytest.mark.parametrize("seqlen", [1, 2, 151])
+@pytest.mark.parametrize("dim", [64, 4096 + 32])
+def test_causal_conv1d_dfinal_states_layout(dim, seqlen, width, itype, dfinal_states_layout):
+    # The gradient of final_states does not have to be channel-last, e.g. final_states.sum()
+    # gives an expanded gradient, and multiplying with a contiguous tensor gives a contiguous one.
+    device = "cuda"
+    rtol, atol = (3e-4, 1e-3) if itype == torch.float32 else (3e-3, 5e-3)
+    if itype == torch.bfloat16:
+        rtol, atol = 1e-2, 5e-2
+    rtolw, atolw = (1e-3, 1e-3)
+    torch.random.manual_seed(0)
+    batch = 2
+    x = torch.randn(batch, seqlen, dim, device=device, dtype=itype).transpose(1, 2).requires_grad_()
+    weight = torch.randn(dim, width, device=device, dtype=torch.float32, requires_grad=True)
+    initial_states = torch.randn(batch, width - 1, dim, device=device, dtype=itype).transpose(1, 2).requires_grad_()
+    x_ref = x.detach().clone().requires_grad_()
+    weight_ref = weight.detach().clone().requires_grad_()
+    initial_states_ref = initial_states.detach().clone().requires_grad_()
+    out, final_states = causal_conv1d_fn(x, weight, initial_states=initial_states, return_final_states=True)
+    out_ref, final_states_ref = causal_conv1d_ref(x_ref, weight_ref, initial_states=initial_states_ref,
+                                                  return_final_states=True)
+    g = torch.randn_like(out)
+    if dfinal_states_layout == "contiguous":
+        g_final = torch.randn(batch, dim, width - 1, device=device, dtype=itype)
+    else:
+        g_final = torch.randn(1, device=device, dtype=itype).expand(batch, dim, width - 1)
+    torch.autograd.backward([out, final_states], [g, g_final])
+    torch.autograd.backward([out_ref, final_states_ref], [g, g_final])
+
+    print(f"dx max diff: {(x.grad - x_ref.grad).abs().max().item()}")
+    print(f"dweight max diff: {(weight.grad - weight_ref.grad).abs().max().item()}")
+    print(f"dinitial_states max diff: {(initial_states.grad - initial_states_ref.grad).abs().max().item()}")
+    assert torch.allclose(x.grad, x_ref.grad.to(dtype=itype), rtol=rtol, atol=atol)
+    assert torch.allclose(weight.grad, weight_ref.grad, rtol=rtolw, atol=atolw)
+    assert torch.allclose(initial_states.grad, initial_states_ref.grad.to(dtype=itype), rtol=rtol, atol=atol)
+
+
 @pytest.mark.parametrize("itype", [torch.float32, torch.float16, torch.bfloat16])
 # @pytest.mark.parametrize('itype', [torch.float16])
 @pytest.mark.parametrize("silu_activation", [False, True])
