@@ -146,9 +146,7 @@ void causal_conv1d_bwd_kernel(ConvParamsBwd params) {
                     reinterpret_cast<vec_t *>(x_vals_load)[0] = reinterpret_cast<vec_t *>(x)[-1];
                 } else {
                     #pragma unroll
-                    for (int i = 0; i < kNElts; ++i) {
-                        if (chunk * kChunkSize + i < params.seqlen) { x_vals_load[i] = x[-kNElts + i]; }
-                    }
+                    for (int i = 0; i < kNElts; ++i) { x_vals_load[i] = x[-kNElts + i]; }
                 }
             }
             __syncthreads();

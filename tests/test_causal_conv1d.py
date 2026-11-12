@@ -62,7 +62,7 @@ def _set_torch_deterministic(enabled: bool) -> bool:
 @pytest.mark.parametrize("width", [2, 3, 4])
 # @pytest.mark.parametrize('width', [3])
 @pytest.mark.parametrize(
-    "seqlen", [1, 2, 8, 16, 32, 64, 128, 129, 130, 151, 256, 372, 512, 784, 1024, 1134, 2048, 4096]
+    "seqlen", [1, 2, 8, 16, 32, 64, 128, 129, 130, 151, 256, 372, 512, 784, 1024, 1025, 1134, 2048, 4096]
 )
 # @pytest.mark.parametrize('seqlen', [8, 16, 32, 64, 128, 256, 512, 784, 1024, 2048, 4096])
 # @pytest.mark.parametrize('seqlen', [128])
