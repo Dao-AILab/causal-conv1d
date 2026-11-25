@@ -20,7 +20,6 @@ from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 import torch
 from torch.utils.cpp_extension import (
     BuildExtension,
-    CppExtension,
     CUDAExtension,
     CUDA_HOME,
     HIP_HOME,
@@ -176,27 +175,27 @@ if not SKIP_CUDA_BUILD:
                     "Note: make sure nvcc has a supported version by running nvcc -V."
                 )
 
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_75,code=sm_75")
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_80,code=sm_80")
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_87,code=sm_87")
-        if bare_metal_version >= Version("11.8"):
             cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_90,code=sm_90")
-        if bare_metal_version >= Version("12.8"):
+            cc_flag.append("arch=compute_75,code=sm_75")
             cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_100,code=sm_100")
+            cc_flag.append("arch=compute_80,code=sm_80")
             cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_120,code=sm_120")
-        if bare_metal_version >= Version("13.0"):
-            cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_103,code=sm_103")
-            cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_110,code=sm_110")
-            cc_flag.append("-gencode")
-            cc_flag.append("arch=compute_121,code=sm_121")
+            cc_flag.append("arch=compute_87,code=sm_87")
+            if bare_metal_version >= Version("11.8"):
+                cc_flag.append("-gencode")
+                cc_flag.append("arch=compute_90,code=sm_90")
+            if bare_metal_version >= Version("12.8"):
+                cc_flag.append("-gencode")
+                cc_flag.append("arch=compute_100,code=sm_100")
+                cc_flag.append("-gencode")
+                cc_flag.append("arch=compute_120,code=sm_120")
+            if bare_metal_version >= Version("13.0"):
+                cc_flag.append("-gencode")
+                cc_flag.append("arch=compute_103,code=sm_103")
+                cc_flag.append("-gencode")
+                cc_flag.append("arch=compute_110,code=sm_110")
+                cc_flag.append("-gencode")
+                cc_flag.append("arch=compute_121,code=sm_121")
 
     # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
     # torch._C._GLIBCXX_USE_CXX11_ABI
@@ -204,54 +203,56 @@ if not SKIP_CUDA_BUILD:
     if FORCE_CXX11_ABI:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
 
-    if HIP_BUILD:
-        extra_compile_args = {
-            "cxx": ["-O3", "-std=c++17"],
-            "nvcc": [
-                "-O3",
-                "-std=c++17",
-                f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
-                "-U__CUDA_NO_HALF_OPERATORS__",
-                "-U__CUDA_NO_HALF_CONVERSIONS__",
-                "-fgpu-flush-denormals-to-zero",
-            ]
-            + cc_flag,
-        }
-    else:
-        extra_compile_args = {
-            "cxx": ["-O3"],
-            "nvcc": append_nvcc_threads(
-                [
+    can_compile = (HIP_BUILD and HIP_HOME is not None) or (not HIP_BUILD and CUDA_HOME is not None)
+    if can_compile:
+        if HIP_BUILD:
+            extra_compile_args = {
+                "cxx": ["-O3", "-std=c++17"],
+                "nvcc": [
                     "-O3",
+                    "-std=c++17",
+                    f"--offload-arch={os.getenv('HIP_ARCHITECTURES', 'native')}",
                     "-U__CUDA_NO_HALF_OPERATORS__",
                     "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "-U__CUDA_NO_BFLOAT16_OPERATORS__",
-                    "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-                    "-U__CUDA_NO_BFLOAT162_OPERATORS__",
-                    "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                    "--use_fast_math",
-                    "--ptxas-options=-v",
-                    "-lineinfo",
+                    "-fgpu-flush-denormals-to-zero",
                 ]
-                + cc_flag
-            ),
-        }
+                + cc_flag,
+            }
+        else:
+            extra_compile_args = {
+                "cxx": ["-O3"],
+                "nvcc": append_nvcc_threads(
+                    [
+                        "-O3",
+                        "-U__CUDA_NO_HALF_OPERATORS__",
+                        "-U__CUDA_NO_HALF_CONVERSIONS__",
+                        "-U__CUDA_NO_BFLOAT16_OPERATORS__",
+                        "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+                        "-U__CUDA_NO_BFLOAT162_OPERATORS__",
+                        "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
+                        "--expt-relaxed-constexpr",
+                        "--expt-extended-lambda",
+                        "--use_fast_math",
+                        "--ptxas-options=-v",
+                        "-lineinfo",
+                    ]
+                    + cc_flag
+                ),
+            }
 
-    ext_modules.append(
-        CUDAExtension(
-            name="causal_conv1d_cuda",
-            sources=[
-                "csrc/causal_conv1d.cpp",
-                "csrc/causal_conv1d_fwd.cu",
-                "csrc/causal_conv1d_bwd.cu",
-                "csrc/causal_conv1d_update.cu",
-            ],
-            extra_compile_args=extra_compile_args,
-            include_dirs=[Path(this_dir) / "csrc"],
+        ext_modules.append(
+            CUDAExtension(
+                name="causal_conv1d_cuda",
+                sources=[
+                    "csrc/causal_conv1d.cpp",
+                    "csrc/causal_conv1d_fwd.cu",
+                    "csrc/causal_conv1d_bwd.cu",
+                    "csrc/causal_conv1d_update.cu",
+                ],
+                extra_compile_args=extra_compile_args,
+                include_dirs=[Path(this_dir) / "csrc"],
+            )
         )
-    )
 
 
 def get_package_version():
@@ -276,6 +277,11 @@ def get_wheel_url():
     else:
         # We're using the CUDA version used to build torch, not the one currently installed
         # _, cuda_version_raw = get_cuda_bare_metal_version(CUDA_HOME)
+        if torch.version.cuda is None:
+            raise RuntimeError(
+                f"PyTorch was built without CUDA support (torch.version.cuda is None). "
+                f"{PACKAGE_NAME} requires a CUDA-enabled PyTorch build."
+            )
         torch_cuda_version = parse(torch.version.cuda)
         # For CUDA 11, we only compile for CUDA 11.8, and for CUDA 12 we only compile for CUDA 12.3
         # to save CI time. Minor versions should be compatible.
@@ -322,6 +328,12 @@ class CachedWheelsCommand(_bdist_wheel):
 
     def run(self):
         if FORCE_BUILD:
+            if not ext_modules:
+                compiler = "hipcc / ROCm" if HIP_BUILD else "nvcc / CUDA_HOME"
+                raise RuntimeError(
+                    f"{PACKAGE_NAME} was requested to be built from source (FORCE_BUILD), "
+                    f"but no compiler was found ({compiler} is not set)."
+                )
             return super().run()
 
         wheel_url, wheel_filename = get_wheel_url()
@@ -343,9 +355,21 @@ class CachedWheelsCommand(_bdist_wheel):
             shutil.move(wheel_filename, wheel_path)
         except urllib.error.HTTPError:
             print("Precompiled wheel not found. Building from source...")
+            if not ext_modules:
+                compiler = "hipcc / ROCm" if HIP_BUILD else "nvcc / CUDA_HOME"
+                raise RuntimeError(
+                    f"Precompiled wheel for {PACKAGE_NAME} not found ({wheel_url}), "
+                    f"and cannot build from source because no compiler was found ({compiler} is not set)."
+                )
             # If the wheel could not be downloaded, build from source
             super().run()
 
+
+cmdclass = (
+    {"bdist_wheel": CachedWheelsCommand, "build_ext": BuildExtension}
+    if ext_modules
+    else {"bdist_wheel": CachedWheelsCommand}
+)
 
 setup(
     name=PACKAGE_NAME,
@@ -374,11 +398,7 @@ setup(
         "Operating System :: Unix",
     ],
     ext_modules=ext_modules,
-    cmdclass={"bdist_wheel": CachedWheelsCommand, "build_ext": BuildExtension}
-    if ext_modules
-    else {
-        "bdist_wheel": CachedWheelsCommand,
-    },
+    cmdclass=cmdclass,
     python_requires=">=3.9",
     install_requires=[
         "torch",
